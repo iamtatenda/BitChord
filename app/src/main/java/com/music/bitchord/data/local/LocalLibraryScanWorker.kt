@@ -114,11 +114,16 @@ class LocalLibraryScanWorker(appContext: Context, params: WorkerParameters) : Co
     
     private fun extractMetadata(fileUriStr: String, rootUriStr: String, sizeBytes: Long, lastModified: Long, fileName: String): LocalTrackEntity? {
         var pfd: android.os.ParcelFileDescriptor? = null
+        var tempLink: File? = null
         try {
             val fileUri = Uri.parse(fileUriStr)
             pfd = applicationContext.contentResolver.openFileDescriptor(fileUri, "r") ?: return null
-            val rawFile = File("/proc/self/fd/${pfd.fd}")
-            val audioFile = AudioFileIO.read(rawFile)
+            
+            val extension = fileName.substringAfterLast('.', "").lowercase()
+            tempLink = File(applicationContext.cacheDir, "scan_link_${System.nanoTime()}.$extension")
+            android.system.Os.symlink("/proc/self/fd/${pfd.fd}", tempLink.absolutePath)
+            
+            val audioFile = AudioFileIO.read(tempLink)
             val tag = audioFile.tag ?: return null
             val header = audioFile.audioHeader
 
@@ -177,6 +182,7 @@ class LocalLibraryScanWorker(appContext: Context, params: WorkerParameters) : Co
             TrackLog.e("ScanWorker", "Unexpected error parsing $fileUriStr: ${e.message}")
         } finally {
             pfd?.close()
+            tempLink?.delete()
         }
         return null
     }

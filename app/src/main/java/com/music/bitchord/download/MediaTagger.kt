@@ -210,6 +210,13 @@ object MediaTagger {
         val plain = lyrics?.plain
         val words = lyrics?.enhanced
         
+        // Restore FLAC streaming optimization to prevent OOM
+        if (extension == "flac" &&
+            tagFlacStreaming(context, uri, track, plain, words, artwork)
+        ) {
+            return
+        }
+
         // If webm, fall back to custom tagger since jaudiotagger doesn't support mkv/webm
         if (extension == "webm") {
             val original = readAll(context, uri) ?: return

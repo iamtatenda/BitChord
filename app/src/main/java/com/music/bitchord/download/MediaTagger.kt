@@ -232,12 +232,14 @@ object MediaTagger {
         }
         
         // For standard formats (m4a, flac, mp3), use jaudiotagger for robust tagging
-        var pfd: android.os.ParcelFileDescriptor? = null
         try {
-            // Write to a persistent cache file first because jaudiotagger cannot edit /proc/self/fd/ pseudo-files
-            val originalBytes = readAll(context, uri) ?: return
+            // Write to a persistent cache file via streaming to avoid OOM
             val tempFile = File(context.cacheDir, "tagging_temp." + extension)
-            tempFile.writeBytes(originalBytes)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                tempFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return
             
             val audioFile = org.jaudiotagger.audio.AudioFileIO.read(tempFile)
             var tag = audioFile.tag
@@ -263,15 +265,21 @@ object MediaTagger {
             
             org.jaudiotagger.audio.AudioFileIO.write(audioFile)
             
-            // Atomic non-cancellable write back to the original URI
+            // Atomic non-cancellable write back to the original URI via streaming
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                writeAll(context, uri, tempFile.readBytes())
+                if (uri.scheme == "file") {
+                    File(requireNotNull(uri.path)).outputStream().use { output ->
+                        tempFile.inputStream().use { input -> input.copyTo(output) }
+                    }
+                } else {
+                    context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                        tempFile.inputStream().use { input -> input.copyTo(output) }
+                    }
+                }
             }
             tempFile.delete()
         } catch (e: Exception) {
             Log.e("MediaTagger", "Failed to embed via jaudiotagger: " + e.message, e)
-        } finally {
-            pfd?.close()
         }
     }
 

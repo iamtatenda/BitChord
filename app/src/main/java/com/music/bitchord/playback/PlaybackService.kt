@@ -959,7 +959,9 @@ class PlaybackService : MediaLibraryService() {
             )
             // Prune consumed USER_QUEUE entries when playback enters CONTEXT,
             // keeping the timeline clean and ensuring REPEAT_MODE_ALL loops only CONTEXT items.
-            QueueCoordinator.consumePlayedUserQueue(exoPlayer)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                QueueCoordinator.consumePlayedUserQueue(exoPlayer)
+            }
 
             // The queue moving on by itself. Nobody pressed anything, but it
             // is still this device deciding what the party plays next, and no
@@ -2885,16 +2887,18 @@ class PlaybackService : MediaLibraryService() {
         // made every one of those paths progressively more expensive.
         val expiredHistory = queueHistoryTrimCount(exoPlayer.currentMediaItemIndex)
         if (expiredHistory > 0) {
-            if (exoPlayer.repeatMode == Player.REPEAT_MODE_ALL) {
-                // Repeat-all still means the whole queue. Rotate history that
-                // has fallen out of the visible 25-song window to the end
-                // instead of deleting it; it becomes upcoming again in the
-                // same order and the loop can continue indefinitely.
-                repeat(expiredHistory) {
-                    exoPlayer.moveMediaItem(0, exoPlayer.mediaItemCount - 1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (exoPlayer.repeatMode == Player.REPEAT_MODE_ALL) {
+                    // Repeat-all still means the whole queue. Rotate history that
+                    // has fallen out of the visible 25-song window to the end
+                    // instead of deleting it; it becomes upcoming again in the
+                    // same order and the loop can continue indefinitely.
+                    repeat(expiredHistory) {
+                        exoPlayer.moveMediaItem(0, exoPlayer.mediaItemCount - 1)
+                    }
+                } else {
+                    exoPlayer.removeMediaItems(0, expiredHistory)
                 }
-            } else {
-                exoPlayer.removeMediaItems(0, expiredHistory)
             }
         }
         // A *different* track is a clean slate for [recoverFrom], and so is the

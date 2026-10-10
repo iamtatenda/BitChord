@@ -199,7 +199,7 @@ object MediaTagger {
         taggingLock.withLock { embedNow(context, uri, track, extension, lyrics, artwork) }
     }
 
-    private fun embedNow(
+    private suspend fun embedNow(
         context: Context,
         uri: Uri,
         track: Song,
@@ -207,70 +207,65 @@ object MediaTagger {
         lyrics: LyricsTag.Embeddable?,
         artwork: Artwork?,
     ) {
-        // The portable field and this app's own. Split here rather than inside
-        // each tagger so all three agree on which string goes where.
         val plain = lyrics?.plain
         val words = lyrics?.enhanced
-
-        // FLAC is the format worth not doing in memory, and the only one that
-        // can be done any other way — see [tagFlacStreaming].
-        if (extension == "flac" &&
-            tagFlacStreaming(context, uri, track, plain, words, artwork)
-        ) {
+        
+        // If webm, fall back to custom tagger since jaudiotagger doesn't support mkv/webm
+        if (extension == "webm") {
+            val original = readAll(context, uri) ?: return
+            val tagged = runCatching {
+                WebmTagger.tag(original, track.title, track.artist, track.albumName, plain, artwork?.bytes, false, words)
+            }.getOrDefault(original)
+            if (tagged !== original) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    writeAll(context, uri, tagged)
+                }
+            }
             return
         }
-
-        val original = readAll(context, uri) ?: return
-        val tagged = runCatching {
-            when (extension) {
-                // Indexed first: a fragmented file saved without a `sidx`
-                // plays but cannot seek. Returns [original] when it has
-                // nothing to add, so the identity check below still holds.
-                "m4a" -> Mp4Tagger.tag(
-                    Mp4Sidx.ensure(original),
-                    track.title,
-                    track.artist,
-                    track.albumName,
-                    plain,
-                    artwork?.bytes,
-                    coverIsPng = false,
-                    wordLyrics = words,
-                )
-                "flac" -> FlacTagger.tag(
-                    original,
-                    track.title,
-                    track.artist,
-                    track.albumName,
-                    plain,
-                    artwork?.bytes,
-                    artwork?.mime ?: "image/jpeg",
-                    wordLyrics = words,
-                )
-                else -> WebmTagger.tag(
-                    original,
-                    track.title,
-                    track.artist,
-                    track.albumName,
-                    plain,
-                    artwork?.bytes,
-                    artwork?.mime ?: "image/jpeg",
-                    wordLyrics = words,
-                )
+        
+        // For standard formats (m4a, flac, mp3), use jaudiotagger for robust tagging
+        var pfd: android.os.ParcelFileDescriptor? = null
+        try {
+            // Write to a persistent cache file first because jaudiotagger cannot edit /proc/self/fd/ pseudo-files
+            val originalBytes = readAll(context, uri) ?: return
+            val tempFile = File(context.cacheDir, "tagging_temp." + extension)
+            tempFile.writeBytes(originalBytes)
+            
+            val audioFile = org.jaudiotagger.audio.AudioFileIO.read(tempFile)
+            var tag = audioFile.tag
+            if (tag == null) {
+                tag = audioFile.createDefaultTag()
+                audioFile.tag = tag
             }
-        }.onFailure {
-            // Named, because the two things that land here are the two things
-            // the user actually notices going missing. An OutOfMemoryError on a
-            // large lossless file is the common one and reads as a track that
-            // simply saved without its cover or its words.
-            Log.w(TAG, "could not build tags for ${track.videoId} (${original.size}B $extension): $it")
-        }.getOrNull() ?: return
-
-        // Every tagger hands back the same array reference when there was
-        // nothing safe to do — cheaper than a byte comparison, and exact
-        // where it matters: it means "don't touch the file that just finished
-        // downloading" rather than "these bytes happen to be equal".
-        if (tagged === original) return
-        writeAll(context, uri, tagged)
+            
+            tag.setField(org.jaudiotagger.tag.FieldKey.TITLE, track.title)
+            tag.setField(org.jaudiotagger.tag.FieldKey.ARTIST, track.artists.joinToString(", ") { it.name })
+            tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM, track.albumName ?: "")
+            
+            if (artwork != null && artwork.bytes.isNotEmpty()) {
+                val newArtwork = org.jaudiotagger.tag.images.ArtworkFactory.getNew()
+                newArtwork.binaryData = artwork.bytes
+                newArtwork.mimeType = artwork.mime
+                newArtwork.pictureType = org.jaudiotagger.tag.reference.PictureTypes.DEFAULT_ID_PICTURE_TYPE.id
+                tag.setField(newArtwork)
+            }
+            if (plain != null) {
+                tag.setField(org.jaudiotagger.tag.FieldKey.LYRICS, plain)
+            }
+            
+            org.jaudiotagger.audio.AudioFileIO.write(audioFile)
+            
+            // Atomic non-cancellable write back to the original URI
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                writeAll(context, uri, tempFile.readBytes())
+            }
+            tempFile.delete()
+        } catch (e: Exception) {
+            Log.e("MediaTagger", "Failed to embed via jaudiotagger: " + e.message, e)
+        } finally {
+            pfd?.close()
+        }
     }
 
     /**

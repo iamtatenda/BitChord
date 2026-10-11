@@ -2216,145 +2216,145 @@ private fun DownloadOptionsSheet() {
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
-                Text(
-                    text = stringResource(R.string.download_storage_section).uppercase(Locale.ROOT),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 22.dp, top = 20.dp, bottom = 6.dp),
-                )
+                SettingsGroup(
+                    header = stringResource(R.string.download_storage_section),
+                    topSpacing = 16.dp,
+                ) {
+                    val selectedFolderLabel = LocalMediaRepository.selectedFolderLabel(downloadFolderUri)
+                    SettingsRow(
+                        icon = Icons.Rounded.Folder,
+                        title = stringResource(R.string.download_folder_title),
+                        subtitle = selectedFolderLabel ?: stringResource(R.string.download_folder_default),
+                        onClick = { folderPicker.launch(null) },
+                    )
 
-                val selectedFolderLabel = LocalMediaRepository.selectedFolderLabel(downloadFolderUri)
-                SettingsRow(
-                    icon = Icons.Rounded.Folder,
-                    title = stringResource(R.string.download_folder_title),
-                    subtitle = selectedFolderLabel ?: stringResource(R.string.download_folder_default),
-                    onClick = { folderPicker.launch(null) },
-                )
-
-                if (!downloadFolderUri.isNullOrBlank()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                AppSettings.setDownloadFolderUri("")
-                            }
-                            .padding(start = TEXT_INSET, end = ROW_INSET, top = 0.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.download_folder_reset),
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                    if (!downloadFolderUri.isNullOrBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    AppSettings.setDownloadFolderUri("")
+                                }
+                                .padding(start = TEXT_INSET, end = ROW_INSET, top = 0.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.download_folder_reset),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.Folder,
+                        title = stringResource(R.string.download_organize_folders_title),
+                        subtitle = stringResource(R.string.download_organize_folders_desc),
+                        trailing = {
+                            Switch(
+                                checked = organizeFolders,
+                                onCheckedChange = AppSettings::setDownloadOrganizeFolders,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadOrganizeFolders(!organizeFolders) },
+                    )
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.VisibilityOff,
+                        title = stringResource(R.string.download_create_nomedia_title),
+                        subtitle = stringResource(R.string.download_create_nomedia_desc),
+                        trailing = {
+                            Switch(
+                                checked = createNomedia,
+                                onCheckedChange = AppSettings::setDownloadCreateNomedia,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadCreateNomedia(!createNomedia) },
+                    )
                 }
 
-                SettingsRow(
-                    icon = Icons.Rounded.Folder,
-                    title = stringResource(R.string.download_organize_folders_title),
-                    subtitle = stringResource(R.string.download_organize_folders_desc),
-                    trailing = {
-                        Switch(
-                            checked = organizeFolders,
-                            onCheckedChange = AppSettings::setDownloadOrganizeFolders,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setDownloadOrganizeFolders(!organizeFolders) },
-                )
+                SettingsGroup(
+                    header = stringResource(R.string.download_metadata_section),
+                    topSpacing = 16.dp,
+                ) {
+                    SettingsRow(
+                        icon = Icons.Rounded.AutoAwesome,
+                        title = stringResource(R.string.download_save_album_cover_title),
+                        subtitle = stringResource(R.string.download_save_album_cover_desc),
+                        trailing = {
+                            Switch(
+                                checked = saveAlbumCover,
+                                onCheckedChange = AppSettings::setDownloadSaveAlbumCover,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadSaveAlbumCover(!saveAlbumCover) },
+                    )
 
-                SettingsRow(
-                    icon = Icons.Rounded.VisibilityOff,
-                    title = stringResource(R.string.download_create_nomedia_title),
-                    subtitle = stringResource(R.string.download_create_nomedia_desc),
-                    trailing = {
-                        Switch(
-                            checked = createNomedia,
-                            onCheckedChange = AppSettings::setDownloadCreateNomedia,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setDownloadCreateNomedia(!createNomedia) },
-                )
+                    RowDivider()
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 22.dp, top = 12.dp, bottom = 6.dp),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outline,
-                )
+                    SettingsRow(
+                        icon = Icons.Rounded.AutoAwesome,
+                        title = stringResource(R.string.download_save_track_cover_title),
+                        subtitle = stringResource(R.string.download_save_track_cover_desc),
+                        trailing = {
+                            Switch(
+                                checked = saveTrackCover,
+                                onCheckedChange = AppSettings::setDownloadSaveTrackCover,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadSaveTrackCover(!saveTrackCover) },
+                    )
 
-                Text(
-                    text = stringResource(R.string.download_metadata_section).uppercase(Locale.ROOT),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 22.dp, top = 14.dp, bottom = 6.dp),
-                )
+                    RowDivider()
 
-                SettingsRow(
-                    icon = Icons.Rounded.AutoAwesome,
-                    title = stringResource(R.string.download_save_album_cover_title),
-                    subtitle = stringResource(R.string.download_save_album_cover_desc),
-                    trailing = {
-                        Switch(
-                            checked = saveAlbumCover,
-                            onCheckedChange = AppSettings::setDownloadSaveAlbumCover,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setDownloadSaveAlbumCover(!saveAlbumCover) },
-                )
+                    SettingsRow(
+                        icon = Icons.AutoMirrored.Rounded.Notes,
+                        title = stringResource(R.string.download_save_lrc_title),
+                        subtitle = stringResource(R.string.download_save_lrc_desc),
+                        trailing = {
+                            Switch(
+                                checked = saveLrcLyrics,
+                                onCheckedChange = AppSettings::setDownloadSaveLrcLyrics,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadSaveLrcLyrics(!saveLrcLyrics) },
+                    )
 
-                SettingsRow(
-                    icon = Icons.Rounded.AutoAwesome,
-                    title = stringResource(R.string.download_save_track_cover_title),
-                    subtitle = stringResource(R.string.download_save_track_cover_desc),
-                    trailing = {
-                        Switch(
-                            checked = saveTrackCover,
-                            onCheckedChange = AppSettings::setDownloadSaveTrackCover,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setDownloadSaveTrackCover(!saveTrackCover) },
-                )
+                    RowDivider()
 
-                SettingsRow(
-                    icon = Icons.AutoMirrored.Rounded.Notes,
-                    title = stringResource(R.string.download_save_lrc_title),
-                    subtitle = stringResource(R.string.download_save_lrc_desc),
-                    trailing = {
-                        Switch(
-                            checked = saveLrcLyrics,
-                            onCheckedChange = AppSettings::setDownloadSaveLrcLyrics,
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            ),
-                        )
-                    },
-                    onClick = { AppSettings.setDownloadSaveLrcLyrics(!saveLrcLyrics) },
-                )
-
-                SettingsRow(
-                    icon = Icons.Rounded.Person,
-                    title = stringResource(R.string.download_artist_separator_title),
-                    subtitle = stringResource(R.string.download_artist_separator_desc),
-                    value = formatArtistSeparator(artistSeparator),
-                    onClick = { currentView = DownloadOptionsView.ARTIST_SEPARATOR },
-                )
+                    SettingsRow(
+                        icon = Icons.Rounded.Person,
+                        title = stringResource(R.string.download_artist_separator_title),
+                        subtitle = stringResource(R.string.download_artist_separator_desc),
+                        value = formatArtistSeparator(artistSeparator),
+                        onClick = { currentView = DownloadOptionsView.ARTIST_SEPARATOR },
+                    )
+                }
             }
         }
         DownloadOptionsView.ARTIST_SEPARATOR -> {
@@ -2392,42 +2392,47 @@ private fun DownloadOptionsSheet() {
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
-                val separators = listOf(
-                    ", " to "Comma (, )",
-                    " / " to "Slash ( / )",
-                    "; " to "Semicolon (; )",
-                    " & " to "Ampersand ( & )",
-                    " • " to "Bullet ( • )",
-                    " | " to "Pipe ( | )",
-                )
+                SettingsGroup(
+                    topSpacing = 16.dp,
+                ) {
+                    val separators = listOf(
+                        ", " to "Comma (, )",
+                        " / " to "Slash ( / )",
+                        "; " to "Semicolon (; )",
+                        " & " to "Ampersand ( & )",
+                        " • " to "Bullet ( • )",
+                        " | " to "Pipe ( | )",
+                    )
 
-                separators.forEach { (sep, label) ->
-                    val chosen = sep == artistSeparator
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                AppSettings.setDownloadArtistSeparator(sep)
-                                currentView = DownloadOptionsView.MAIN
-                            }
-                            .padding(horizontal = 22.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (chosen) {
-                            Spacer(Modifier.width(12.dp))
-                            Icon(
-                                Icons.Rounded.Check,
-                                contentDescription = stringResource(R.string.selected),
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp),
+                    separators.forEachIndexed { index, (sep, label) ->
+                        val chosen = sep == artistSeparator
+                        if (index > 0) RowDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    AppSettings.setDownloadArtistSeparator(sep)
+                                    currentView = DownloadOptionsView.MAIN
+                                }
+                                .padding(horizontal = ROW_INSET, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.weight(1f),
                             )
+                            if (chosen) {
+                                Spacer(Modifier.width(12.dp))
+                                Icon(
+                                    Icons.Rounded.Check,
+                                    contentDescription = stringResource(R.string.selected),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
                         }
                     }
                 }

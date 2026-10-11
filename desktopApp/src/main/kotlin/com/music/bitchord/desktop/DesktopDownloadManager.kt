@@ -27,8 +27,29 @@ object DesktopDownloadManager {
         return try {
             require(song.localPath == null) { "This track is already local" }
             val stream = DesktopMusicSources.resolve(song, quality, forDownload = true).getOrThrow()
-            val directory = Path.of(System.getProperty("user.home"), "Music", "BitChord")
+            val persistence = DesktopPersistence()
+            val baseDir = persistence.downloadFolder() ?: Path.of(System.getProperty("user.home"), "Music", "BitChord")
+            val isOrganized = persistence.downloadOrganizeFolders()
+            val directory = if (isOrganized) {
+                val artistDir = song.artist.replace(ILLEGAL_FILENAME, "_").trim().ifBlank { "Unknown Artist" }
+                val albumDir = song.albumName?.replace(ILLEGAL_FILENAME, "_")?.trim()?.ifBlank { "Unknown Album" } ?: "Unknown Album"
+                baseDir.resolve(artistDir).resolve(albumDir)
+            } else {
+                baseDir
+            }
             Files.createDirectories(directory)
+
+            if (persistence.downloadCreateNomedia()) {
+                runCatching {
+                    val rootNomedia = baseDir.resolve(".nomedia")
+                    if (!Files.exists(rootNomedia)) Files.createFile(rootNomedia)
+                    if (isOrganized) {
+                        val subNomedia = directory.resolve(".nomedia")
+                        if (!Files.exists(subNomedia)) Files.createFile(subNomedia)
+                    }
+                }
+            }
+
             val safeName = buildString {
                 append(song.artist)
                 append(" - ")
@@ -58,6 +79,7 @@ object DesktopDownloadManager {
                 }
                 check(Files.size(temporary) > 0L) { "Download failed: nothing was sent" }
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+                saveCompanions(song, safeName, directory, isOrganized, persistence)
                 return Result.success(song.copy(localUri = target.toUri().toString(), localPath = target.toString()))
             }
 
@@ -107,6 +129,7 @@ object DesktopDownloadManager {
             }.getOrElse {
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
             }
+            saveCompanions(song, safeName, directory, isOrganized, persistence)
             Result.success(song.copy(localUri = target.toUri().toString(), localPath = target.toString()))
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -152,9 +175,66 @@ object DesktopDownloadManager {
     /** Deletes the file saved for [song]. Returns whether there was one to delete. */
     fun delete(song: Song): Boolean {
         val file = savedFile(song) ?: return false
+        val parent = file.parent
+        val stem = file.fileName.toString().substringBeforeLast('.')
+        if (parent != null) {
+            runCatching { Files.deleteIfExists(parent.resolve("$stem.lrc")) }
+            runCatching { Files.deleteIfExists(parent.resolve("$stem.jpg")) }
+        }
         return runCatching { Files.deleteIfExists(file) }
             .onFailure { DesktopTrackLog.log("could not delete the download of '${song.title}': ${it.message}") }
             .getOrDefault(false)
+    }
+
+    private suspend fun saveCompanions(
+        song: Song,
+        safeName: String,
+        directory: Path,
+        isOrganized: Boolean,
+        persistence: DesktopPersistence,
+    ) {
+        // 1. Line-synced lyrics (.lrc)
+        if (persistence.downloadSaveLrc()) {
+            runCatching {
+                val lyricsRes = DesktopLyricsClient.lookup(song).getOrNull()
+                val lrcText = lyricsRes?.lines?.takeIf { it.isNotEmpty() }?.joinToString("\n") { line ->
+                    val mm = (line.timeMs / 60000).toString().padStart(2, '0')
+                    val ss = ((line.timeMs % 60000) / 1000).toString().padStart(2, '0')
+                    val xx = ((line.timeMs % 1000) / 10).toString().padStart(2, '0')
+                    "[$mm:$ss.$xx] ${line.text}"
+                }
+                if (!lrcText.isNullOrBlank()) {
+                    val lrcFile = directory.resolve("$safeName.lrc")
+                    Files.writeString(lrcFile, lrcText, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+                }
+            }
+        }
+
+        // 2. Artwork (cover.jpg and <safeName>.jpg)
+        val thumbUrl = song.thumbnailUrl
+        if (thumbUrl != null && (persistence.downloadSaveAlbumCover() || persistence.downloadSaveTrackCover())) {
+            runCatching {
+                val artReq = DesktopDownloadHttp.request(thumbUrl, DOWNLOAD_USER_AGENT, emptyMap())
+                DesktopDownloadHttp.client.newCall(artReq).execute().use { artResp ->
+                    if (artResp.isSuccessful) {
+                        val artBytes = artResp.body.bytes()
+                        if (artBytes.isNotEmpty()) {
+                            // Cover.jpg strictly gated on isOrganized and non-blank albumName
+                            if (persistence.downloadSaveAlbumCover() && isOrganized && !song.albumName.isNullOrBlank()) {
+                                val coverFile = directory.resolve("cover.jpg")
+                                if (!Files.exists(coverFile)) {
+                                    Files.write(coverFile, artBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+                                }
+                            }
+                            if (persistence.downloadSaveTrackCover()) {
+                                val trackCover = directory.resolve("$safeName.jpg")
+                                Files.write(trackCover, artBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun DesktopStreamFormat.fileExtension(): String {

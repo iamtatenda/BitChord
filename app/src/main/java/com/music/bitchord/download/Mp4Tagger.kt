@@ -54,12 +54,14 @@ object Mp4Tagger {
         coverIsPng: Boolean,
         /** The A2 form, kept beside [lyrics] rather than instead of it — see [freeformItem]. */
         wordLyrics: String? = null,
+        albumArtist: String? = null,
     ): ByteArray {
         val items = mutableListOf<ByteArray>()
         // © is iTunes's own "copyright" prefix for the four text atoms
         // below — not a copyright mark here, just the byte their readers key on.
         if (title.isNotBlank()) items += textItem("©nam", title)
         if (artist.isNotBlank()) items += textItem("©ART", artist)
+        if (!albumArtist.isNullOrBlank()) items += textItem("aART", albumArtist)
         if (!album.isNullOrBlank()) items += textItem("©alb", album)
         // `©lyr` is a UTF-8 text atom like the three above, with no length limit
         // and no objection to newlines, so LRC goes in as-is. There is a

@@ -93,18 +93,24 @@ class LocalLibraryScanWorker(appContext: Context, params: WorkerParameters) : Co
         for (file in filesList) {
             if (file.isDirectory) {
                 walkDirectory(treeUri, file.docId, existing, activePaths, toInsert, dao)
-            } else if (file.mimeType?.startsWith("audio/") == true) {
-                val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, file.docId).toString()
-                activePaths.add(fileUri)
-                
-                val existingModTime = existing[fileUri]
-                if (existingModTime == null || existingModTime < file.lastModified) {
-                    val track = extractMetadata(fileUri, treeUri.toString(), file.size, file.lastModified, file.name)
-                    if (track != null) {
-                        toInsert.add(track)
-                        if (toInsert.size >= 100) {
-                            dao.insertTracks(toInsert.toList())
-                            toInsert.clear()
+            } else {
+                val ext = file.name.substringAfterLast('.', "").lowercase()
+                val isAudio = file.mimeType?.startsWith("audio/") == true || ext in setOf(
+                    "mp3", "m4a", "flac", "ogg", "opus", "wav", "aac", "webm", "wma", "alac", "dsf", "dff"
+                )
+                if (isAudio) {
+                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, file.docId).toString()
+                    activePaths.add(fileUri)
+                    
+                    val existingModTime = existing[fileUri]
+                    if (existingModTime == null || existingModTime < file.lastModified) {
+                        val track = extractMetadata(fileUri, treeUri.toString(), file.size, file.lastModified, file.name)
+                        if (track != null) {
+                            toInsert.add(track)
+                            if (toInsert.size >= 100) {
+                                dao.insertTracks(toInsert.toList())
+                                toInsert.clear()
+                            }
                         }
                     }
                 }
@@ -121,34 +127,72 @@ class LocalLibraryScanWorker(appContext: Context, params: WorkerParameters) : Co
             
             val extension = fileName.substringAfterLast('.', "").lowercase()
             tempLink = File(applicationContext.cacheDir, "scan_link_${System.nanoTime()}.$extension")
-            android.system.Os.symlink("/proc/self/fd/${pfd.fd}", tempLink.absolutePath)
+            runCatching { android.system.Os.symlink("/proc/self/fd/${pfd.fd}", tempLink.absolutePath) }
             
-            val audioFile = AudioFileIO.read(tempLink)
-            val tag = audioFile.tag ?: return null
-            val header = audioFile.audioHeader
-
-            val title = tag.getFirst(FieldKey.TITLE).takeIf { it.isNotBlank() } ?: fileName
-            val artist = tag.getFirst(FieldKey.ARTIST).takeIf { it.isNotBlank() } ?: "Unknown Artist"
-            val album = tag.getFirst(FieldKey.ALBUM).takeIf { it.isNotBlank() } ?: "Unknown Album"
-            val albumArtist = tag.getFirst(FieldKey.ALBUM_ARTIST)
-            val genre = tag.getFirst(FieldKey.GENRE)
-            val composer = tag.getFirst(FieldKey.COMPOSER)
-            val trackNumber = tag.getFirst(FieldKey.TRACK).toIntOrNull()
-            val discNumber = tag.getFirst(FieldKey.DISC_NO).toIntOrNull()
-            val year = tag.getFirst(FieldKey.YEAR).toIntOrNull()
-            
+            var title = fileName.substringBeforeLast('.')
+            var artist = "Unknown Artist"
+            var album = "Unknown Album"
+            var albumArtist: String? = null
+            var genre: String? = null
+            var composer: String? = null
+            var trackNumber: Int? = null
+            var discNumber: Int? = null
+            var year: Int? = null
+            var durationMs = 0L
             var albumArtPath: String? = null
-            val artwork = tag.firstArtwork
-            if (artwork != null && artwork.binaryData != null) {
-                val artDir = File(applicationContext.filesDir, "album_art").apply { mkdirs() }
-                
-                val digest = java.security.MessageDigest.getInstance("SHA-256")
-                val hashBytes = digest.digest(("$album-$artist").toByteArray(Charsets.UTF_8))
-                val hashString = hashBytes.joinToString("") { "%02x".format(it) }
-                
-                val artFile = File(artDir, "${hashString}.jpg")
-                if (!artFile.exists()) artFile.writeBytes(artwork.binaryData)
-                albumArtPath = artFile.absolutePath
+
+            if (tempLink.exists()) {
+                runCatching {
+                    val audioFile = AudioFileIO.read(tempLink)
+                    val tag = audioFile.tag
+                    if (tag != null) {
+                        tag.getFirst(FieldKey.TITLE).takeIf { it.isNotBlank() }?.let { title = it }
+                        tag.getFirst(FieldKey.ARTIST).takeIf { it.isNotBlank() }?.let { artist = it }
+                        tag.getFirst(FieldKey.ALBUM).takeIf { it.isNotBlank() }?.let { album = it }
+                        albumArtist = tag.getFirst(FieldKey.ALBUM_ARTIST).takeIf { it.isNotBlank() }
+                        genre = tag.getFirst(FieldKey.GENRE).takeIf { it.isNotBlank() }
+                        composer = tag.getFirst(FieldKey.COMPOSER).takeIf { it.isNotBlank() }
+                        trackNumber = tag.getFirst(FieldKey.TRACK).toIntOrNull()
+                        discNumber = tag.getFirst(FieldKey.DISC_NO).toIntOrNull()
+                        year = tag.getFirst(FieldKey.YEAR).toIntOrNull()
+
+                        val artwork = tag.firstArtwork
+                        if (artwork != null && artwork.binaryData != null) {
+                            val artDir = File(applicationContext.filesDir, "album_art").apply { mkdirs() }
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                            val hashBytes = digest.digest(("$album-$artist").toByteArray(Charsets.UTF_8))
+                            val hashString = hashBytes.joinToString("") { "%02x".format(it) }
+                            val artFile = File(artDir, "${hashString}.jpg")
+                            if (!artFile.exists()) artFile.writeBytes(artwork.binaryData)
+                            albumArtPath = artFile.absolutePath
+                        }
+                    }
+                    audioFile.audioHeader?.let { durationMs = (it.trackLength * 1000).toLong() }
+                }
+            }
+
+            if (durationMs <= 0L) {
+                runCatching {
+                    val mmr = android.media.MediaMetadataRetriever()
+                    mmr.setDataSource(applicationContext, fileUri)
+                    mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }?.let { title = it }
+                    mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)?.takeIf { it.isNotBlank() }?.let { artist = it }
+                    mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() }?.let { album = it }
+                    mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.let { durationMs = it }
+                    if (albumArtPath == null) {
+                        val embedded = mmr.embeddedPicture
+                        if (embedded != null) {
+                            val artDir = File(applicationContext.filesDir, "album_art").apply { mkdirs() }
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                            val hashBytes = digest.digest(("$album-$artist").toByteArray(Charsets.UTF_8))
+                            val hashString = hashBytes.joinToString("") { "%02x".format(it) }
+                            val artFile = File(artDir, "${hashString}.jpg")
+                            if (!artFile.exists()) artFile.writeBytes(embedded)
+                            albumArtPath = artFile.absolutePath
+                        }
+                    }
+                    mmr.release()
+                }
             }
 
             return LocalTrackEntity(
@@ -159,7 +203,7 @@ class LocalLibraryScanWorker(appContext: Context, params: WorkerParameters) : Co
                 album = album,
                 genre = genre,
                 composer = composer,
-                durationMs = (header.trackLength * 1000).toLong(),
+                durationMs = durationMs,
                 trackNumber = trackNumber,
                 discNumber = discNumber,
                 year = year,

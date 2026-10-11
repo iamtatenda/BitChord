@@ -858,6 +858,7 @@ private fun BitChordApp(
         }
     }
     LaunchedEffect(localMusicFolderUri, filterNonMusicAudio) {
+        viewModel.loadLibrarySongs()
         if (detail?.browseId == "local:all") {
             viewModel.reloadLocalDetail("local:all")
         }

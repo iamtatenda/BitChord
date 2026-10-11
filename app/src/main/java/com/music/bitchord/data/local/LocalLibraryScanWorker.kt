@@ -5,7 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.music.bitchord.playback.TrackLog
+import com.music.bitchord.data.TrackLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO

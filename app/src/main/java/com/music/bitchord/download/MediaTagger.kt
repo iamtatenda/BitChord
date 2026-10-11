@@ -287,7 +287,7 @@ object MediaTagger {
                 val newArtwork = org.jaudiotagger.tag.images.ArtworkFactory.getNew()
                 newArtwork.binaryData = artwork.bytes
                 newArtwork.mimeType = artwork.mime
-                newArtwork.pictureType = org.jaudiotagger.tag.reference.PictureTypes.DEFAULT_ID_PICTURE_TYPE.id
+                newArtwork.pictureType = 3 // 3 = Front Cover (ID3v2 & FLAC Picture standard)
                 tag.setField(newArtwork)
             }
             if (plain != null) {

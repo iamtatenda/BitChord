@@ -83,10 +83,15 @@ object Mp4Tagger {
     }
 
     private fun insert(bytes: ByteArray, moov: BoxRef, udta: ByteArray): ByteArray {
-        val insertAt = moov.end
-        val delta = udta.size
+        val existingUdta = parseBoxes(bytes, moov.contentOffset, moov.end).firstOrNull { it.type == "udta" }
+        val insertAt = existingUdta?.offset ?: moov.end
+        val afterOld = existingUdta?.end ?: moov.end
+        val oldUdtaSize = existingUdta?.size ?: 0
+        val delta = udta.size - oldUdtaSize
 
         val prefix = bytes.copyOf(insertAt)
+        val suffix = bytes.copyOfRange(afterOld, bytes.size)
+
         // rawSize32 == 0 means "this box runs to the end of its parent" — still
         // true after the insertion, since nothing follows moov but this new
         // atom, so the field is left as-is rather than given a concrete value.
@@ -102,12 +107,11 @@ object Mp4Tagger {
         collectOffsetBoxes(bytes, moov, offsetBoxes)
         offsetBoxes.forEach { box ->
             when (box.type) {
-                "stco" -> patchStco(prefix, box, insertAt, delta)
-                "co64" -> patchCo64(prefix, box, insertAt, delta)
+                "stco" -> patchStco(prefix, suffix, box, insertAt, afterOld, delta)
+                "co64" -> patchCo64(prefix, suffix, box, insertAt, afterOld, delta)
             }
         }
 
-        val suffix = bytes.copyOfRange(insertAt, bytes.size)
         return prefix + udta + suffix
     }
 
@@ -122,25 +126,29 @@ object Mp4Tagger {
     }
 
     /** `stco`: FullBox header, an entry count, then that many 32-bit offsets. */
-    private fun patchStco(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
-        val base = box.contentOffset + 4
-        val count = readU32(bytes, base).toInt()
-        var p = base + 4
+    private fun patchStco(prefix: ByteArray, suffix: ByteArray, box: BoxRef, insertAt: Int, afterOld: Int, delta: Int) {
+        val inPrefix = box.contentOffset < insertAt
+        val target = if (inPrefix) prefix else suffix
+        val baseOffset = if (inPrefix) box.contentOffset + 4 else (box.contentOffset - afterOld) + 4
+        val count = readU32(target, baseOffset).toInt()
+        var p = baseOffset + 4
         repeat(count) {
-            val off = readU32(bytes, p)
-            if (off >= insertAt) writeU32(bytes, p, off + delta)
+            val off = readU32(target, p)
+            if (off >= afterOld) writeU32(target, p, off + delta)
             p += 4
         }
     }
 
     /** `co64`: the same shape as [patchStco], with 64-bit offsets. */
-    private fun patchCo64(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
-        val base = box.contentOffset + 4
-        val count = readU32(bytes, base).toInt()
-        var p = base + 4
+    private fun patchCo64(prefix: ByteArray, suffix: ByteArray, box: BoxRef, insertAt: Int, afterOld: Int, delta: Int) {
+        val inPrefix = box.contentOffset < insertAt
+        val target = if (inPrefix) prefix else suffix
+        val baseOffset = if (inPrefix) box.contentOffset + 4 else (box.contentOffset - afterOld) + 4
+        val count = readU32(target, baseOffset).toInt()
+        var p = baseOffset + 4
         repeat(count) {
-            val off = readU64(bytes, p)
-            if (off >= insertAt) writeU64(bytes, p, off + delta)
+            val off = readU64(target, p)
+            if (off >= afterOld) writeU64(target, p, off + delta)
             p += 8
         }
     }

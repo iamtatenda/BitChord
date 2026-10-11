@@ -298,9 +298,12 @@ object LocalMediaRepository {
                             File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
                                 ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
                                 ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                ?: File(parent, "Folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                ?: File(parent, "cover.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
                         } else null
                     }
-                    val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else folderArt
+                    val artworkUrl = folderArt ?: if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else null
                     val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
 
                     songs.add(
@@ -339,6 +342,33 @@ object LocalMediaRepository {
             if (stdMusic.exists() && stdMusic.isDirectory) targetFolders.add(stdMusic)
             val stdDownload = File("/storage/emulated/0/Download")
             if (stdDownload.exists() && stdDownload.isDirectory) targetFolders.add(stdDownload)
+
+            // Direct SD Card scanning: detect physical SD card mount points in /storage
+            val storageRoot = File("/storage")
+            if (storageRoot.exists() && storageRoot.isDirectory) {
+                storageRoot.listFiles()?.forEach { vol ->
+                    if (vol.isDirectory && vol.name != "emulated" && vol.name != "self") {
+                        val sdMusic = File(vol, "Music")
+                        if (sdMusic.exists() && sdMusic.isDirectory && sdMusic !in targetFolders) targetFolders.add(sdMusic)
+                        val sdDownload = File(vol, "Download")
+                        if (sdDownload.exists() && sdDownload.isDirectory && sdDownload !in targetFolders) targetFolders.add(sdDownload)
+                    }
+                }
+            }
+            // Also query Android's external storage directories to discover all physical SD card mount roots
+            runCatching {
+                androidx.core.content.ContextCompat.getExternalFilesDirs(context, null).forEach { extDir ->
+                    if (extDir != null) {
+                        val rootPath = extDir.absolutePath.substringBefore("/Android/data")
+                        if (rootPath != "/storage/emulated/0" && rootPath.isNotBlank()) {
+                            val sdMusic = File(rootPath, "Music")
+                            if (sdMusic.exists() && sdMusic.isDirectory && sdMusic !in targetFolders) targetFolders.add(sdMusic)
+                            val sdDownload = File(rootPath, "Download")
+                            if (sdDownload.exists() && sdDownload.isDirectory && sdDownload !in targetFolders) targetFolders.add(sdDownload)
+                        }
+                    }
+                }
+            }
         }
 
         for (folder in targetFolders) {
@@ -485,12 +515,8 @@ object LocalMediaRepository {
     }
 
     private fun isAudioFileName(name: String): Boolean {
-        val lower = name.lowercase(Locale.ROOT)
-        return lower.endsWith(".mp3") || lower.endsWith(".m4a") ||
-            lower.endsWith(".flac") || lower.endsWith(".wav") ||
-            lower.endsWith(".ogg") || lower.endsWith(".opus") ||
-            lower.endsWith(".aac") || lower.endsWith(".webm") ||
-            lower.endsWith(".3gp")
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        return ext in localMusicExtensions || ext == "3gp"
     }
 
     /**
@@ -557,6 +583,17 @@ object LocalMediaRepository {
         var album: String? = null
         var durationText: String? = null
 
+        val parent = file.parentFile
+        val folderArt = if (parent != null && parent.exists()) {
+            File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                ?: File(parent, "Folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                ?: File(parent, "cover.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+        } else null
+
+        var extractedArt: String? = null
         runCatching {
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(path)
@@ -571,15 +608,17 @@ object LocalMediaRepository {
             if (metaDur != null && metaDur > 0) {
                 durationText = formatDuration(metaDur)
             }
+            if (folderArt == null) {
+                val pic = retriever.embeddedPicture
+                if (pic != null && pic.isNotEmpty()) {
+                    val artDir = File(context.cacheDir, "local_art").apply { mkdirs() }
+                    val artFile = File(artDir, "${path.hashCode()}.jpg")
+                    if (!artFile.exists()) runCatching { artFile.writeBytes(pic) }
+                    if (artFile.exists()) extractedArt = Uri.fromFile(artFile).toString()
+                }
+            }
             retriever.release()
         }
-
-        val parent = file.parentFile
-        val folderArt = if (parent != null && parent.exists()) {
-            File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-        } else null
 
         val modified = file.lastModified().takeIf { it > 0 }?.div(1000)
         val fileUri = Uri.fromFile(file).toString()
@@ -588,7 +627,7 @@ object LocalMediaRepository {
             videoId = fileUri,
             title = title,
             artist = artist,
-            thumbnailUrl = folderArt,
+            thumbnailUrl = folderArt ?: extractedArt,
             durationText = durationText,
             albumName = album,
             localUri = fileUri,
@@ -607,6 +646,7 @@ object LocalMediaRepository {
         var artist = "Unknown Artist"
         var album: String? = null
         var durationText: String? = null
+        var artworkUrl: String? = null
 
         runCatching {
             val retriever = MediaMetadataRetriever()
@@ -622,6 +662,13 @@ object LocalMediaRepository {
             if (metaDur != null && metaDur > 0) {
                 durationText = formatDuration(metaDur)
             }
+            val pic = retriever.embeddedPicture
+            if (pic != null && pic.isNotEmpty()) {
+                val artDir = File(context.cacheDir, "local_art").apply { mkdirs() }
+                val artFile = File(artDir, "${doc.uri.toString().hashCode()}.jpg")
+                if (!artFile.exists()) runCatching { artFile.writeBytes(pic) }
+                if (artFile.exists()) artworkUrl = Uri.fromFile(artFile).toString()
+            }
             retriever.release()
         }
 
@@ -632,7 +679,7 @@ object LocalMediaRepository {
             videoId = uriStr,
             title = title,
             artist = artist,
-            thumbnailUrl = null,
+            thumbnailUrl = artworkUrl,
             durationText = durationText,
             albumName = album,
             localUri = uriStr,

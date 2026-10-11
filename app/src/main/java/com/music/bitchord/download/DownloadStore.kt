@@ -551,9 +551,40 @@ object DownloadStore {
                     return
                 }
             }
-            target.writeBytes(bytes)
-            if (!fileName.startsWith(".")) {
-                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
+            val written = runCatching {
+                target.writeBytes(bytes)
+                true
+            }.getOrDefault(false)
+
+            if (written) {
+                if (!fileName.startsWith(".")) {
+                    MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
+                }
+                return
+            }
+
+            // Scoped Storage fallback on Android 10+ (API 29+) when direct File write is restricted
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val relPath = if (subfolder.isNullOrEmpty()) "Music/$FOLDER/" else "Music/$FOLDER/$subfolder/"
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val collectionUri = if (mimeType.startsWith("image/")) {
+                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                } else {
+                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                }
+                val itemUri = context.contentResolver.insert(collectionUri, contentValues)
+                if (itemUri != null) {
+                    context.contentResolver.openOutputStream(itemUri)?.use { it.write(bytes) }
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    context.contentResolver.update(itemUri, contentValues, null, null)
+                    return
+                }
             }
         }.onFailure { Log.w(TAG, "Companion write non-fatal failure for $fileName: ${it.message}") }
     }

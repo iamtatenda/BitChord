@@ -1,0 +1,105 @@
+name: Build Test APK
+
+on:
+  push:
+    branches:
+      - feature-local-indexing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup local.properties
+        run: |
+          echo "LASTFM_API_KEY=${{ secrets.LASTFM_API_KEY }}" > local.properties
+          echo "LASTFM_SECRET=${{ secrets.LASTFM_SECRET }}" >> local.properties
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Dev and Prod Debug APKs
+        run: ./gradlew assembleDevDebug assembleProdDebug
+
+      - name: Prepare APKs
+        run: |
+          mkdir -p dist-apk
+          # Copy ABI-split and universal APKs for dev flavor
+          for f in app/build/outputs/apk/dev/debug/*.apk; do
+            [ -e "$f" ] || continue
+            base=$(basename "$f")
+            newname=$(echo "$base" | sed 's/^app-dev-/BitChord-dev-/')
+            cp "$f" "dist-apk/$newname"
+          done
+
+          # If universal apk is present, alias it to BitChord-dev-debug.apk for 1-tap download
+          if [ -f dist-apk/BitChord-dev-universal-debug.apk ]; then
+            cp dist-apk/BitChord-dev-universal-debug.apk dist-apk/BitChord-dev-debug.apk
+          elif [ -f dist-apk/BitChord-dev-arm64-v8a-debug.apk ]; then
+            cp dist-apk/BitChord-dev-arm64-v8a-debug.apk dist-apk/BitChord-dev-debug.apk
+          fi
+
+          # Copy ABI-split and universal APKs for prod flavor
+          for f in app/build/outputs/apk/prod/debug/*.apk; do
+            [ -e "$f" ] || continue
+            base=$(basename "$f")
+            newname=$(echo "$base" | sed 's/^app-prod-/BitChord-prod-/')
+            cp "$f" "dist-apk/$newname"
+          done
+
+          if [ -f dist-apk/BitChord-prod-universal-debug.apk ]; then
+            cp dist-apk/BitChord-prod-universal-debug.apk dist-apk/BitChord-prod-debug.apk
+          elif [ -f dist-apk/BitChord-prod-arm64-v8a-debug.apk ]; then
+            cp dist-apk/BitChord-prod-arm64-v8a-debug.apk dist-apk/BitChord-prod-debug.apk
+          fi
+
+          echo "Prepared APKs:"
+          ls -lh dist-apk/
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchord-test-apks
+          path: dist-apk/*
+
+      - name: Publish GitHub Release
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test-build
+          target_commitish: ${{ github.sha }}
+          name: "Test Build: Local Library & Download Customizations"
+          body: |
+            ### Automated Test Build
+            Built from branch `feature-local-indexing` (${{ github.sha }}).
+
+            #### Which APK should I install on my phone?
+            - **`BitChord-dev-debug.apk` (Recommended):**
+              Universal build using package `com.dev.bitchord` ("BitChord Dev").
+              Can be installed **side-by-side** with your official BitChord app without signature conflicts or uninstalling your current app!
+            - **`BitChord-dev-arm64-v8a-debug.apk`:**
+              Smaller download optimized for modern 64-bit ARM devices (most Android phones).
+            - **`BitChord-prod-debug.apk`:**
+              Uses production package `com.music.bitchord`. Note: if you have official BitChord installed from GitHub releases or F-Droid, you will need to uninstall it first due to debug vs release signature mismatch.
+          files: dist-apk/*
+          prerelease: true
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

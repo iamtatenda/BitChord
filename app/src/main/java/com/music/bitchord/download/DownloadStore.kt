@@ -566,18 +566,42 @@ object DownloadStore {
             // Scoped Storage fallback on Android 10+ (API 29+) when direct File write is restricted
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val relPath = if (subfolder.isNullOrEmpty()) "Music/$FOLDER/" else "Music/$FOLDER/$subfolder/"
+                val filesUri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                
+                // Query for existing companion entry to prevent duplicates (e.g. cover (1).jpg)
+                var existingUri: Uri? = null
+                var existingSize: Long = -1L
+                context.contentResolver.query(
+                    filesUri,
+                    arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE),
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+                    arrayOf(fileName, relPath),
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                        existingSize = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
+                        existingUri = android.content.ContentUris.withAppendedId(filesUri, id)
+                    }
+                }
+
+                if (existingUri != null) {
+                    if (fileName == ".nomedia" || (fileName == "cover.jpg" && existingSize == bytes.size.toLong())) {
+                        return
+                    }
+                    val stream = runCatching { context.contentResolver.openOutputStream(existingUri!!, "wt") }.getOrNull()
+                        ?: context.contentResolver.openOutputStream(existingUri!!, "w")
+                    stream?.use { it.write(bytes) }
+                    return
+                }
+
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                     put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                val collectionUri = if (mimeType.startsWith("image/")) {
-                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                }
-                val itemUri = context.contentResolver.insert(collectionUri, contentValues)
+                val itemUri = context.contentResolver.insert(filesUri, contentValues)
                 if (itemUri != null) {
                     context.contentResolver.openOutputStream(itemUri)?.use { it.write(bytes) }
                     contentValues.clear()

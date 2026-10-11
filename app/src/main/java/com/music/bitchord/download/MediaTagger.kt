@@ -82,7 +82,7 @@ object MediaTagger {
      * a half-written one: a WAV's metadata lives in RIFF chunks that a good
      * number of players ignore outright.
      */
-    private val TAGGABLE = setOf("m4a", "webm", "flac")
+    private val TAGGABLE = setOf("m4a", "mp4", "webm", "flac")
 
     /**
      * Whether a file of [extension] gets tags at all.
@@ -101,6 +101,10 @@ object MediaTagger {
         val thumbnailUrl = track.thumbnailUrl
         if (!thumbnailUrl.isNullOrBlank()) {
             cachedArtwork(context, thumbnailUrl)?.let { return it }
+        }
+        val collectionArt = Downloads.collections.value.values.firstOrNull { track.videoId in it.videoIds }?.thumbnailUrl
+        if (!collectionArt.isNullOrBlank()) {
+            cachedArtwork(context, collectionArt)?.let { return it }
         }
         return fetchCover(track)
     }
@@ -419,6 +423,10 @@ object MediaTagger {
         val rawThumb = track.thumbnailUrl
         if (!rawThumb.isNullOrBlank() && rawThumb != highRes) {
             fetchCover(rawThumb, track.videoId)?.let { return it }
+        }
+        val collectionArt = Downloads.collections.value.values.firstOrNull { track.videoId in it.videoIds }?.thumbnailUrl
+        if (!collectionArt.isNullOrBlank() && collectionArt != rawThumb && collectionArt != highRes) {
+            fetchCover(collectionArt, track.videoId)?.let { return it }
         }
         if (track.videoId.isNotBlank()) {
             fetchCover("https://i.ytimg.com/vi/${track.videoId}/maxresdefault.jpg", track.videoId)?.let { return it }

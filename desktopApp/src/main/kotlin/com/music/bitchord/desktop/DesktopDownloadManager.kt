@@ -30,10 +30,14 @@ object DesktopDownloadManager {
             val persistence = DesktopPersistence()
             val baseDir = persistence.downloadFolder() ?: Path.of(System.getProperty("user.home"), "Music", "BitChord")
             val isOrganized = persistence.downloadOrganizeFolders()
+            val albumArtist = resolveAlbumArtistString(song).replace(ILLEGAL_FILENAME, "_").trim().ifBlank { "Unknown Artist" }
+            val albumName = song.albumName?.replace(ILLEGAL_FILENAME, "_")?.trim()?.takeIf { it.isNotBlank() }
             val directory = if (isOrganized) {
-                val artistDir = song.artist.replace(ILLEGAL_FILENAME, "_").trim().ifBlank { "Unknown Artist" }
-                val albumDir = song.albumName?.replace(ILLEGAL_FILENAME, "_")?.trim()?.ifBlank { "Unknown Album" } ?: "Unknown Album"
-                baseDir.resolve(artistDir).resolve(albumDir)
+                if (albumName != null) {
+                    baseDir.resolve(albumArtist).resolve(albumName)
+                } else {
+                    baseDir.resolve(albumArtist)
+                }
             } else {
                 baseDir
             }
@@ -50,11 +54,15 @@ object DesktopDownloadManager {
                 }
             }
 
+            val artistSeparator = persistence.downloadArtistSeparator()
+            val resolvedArtist = resolveArtistsString(song, artistSeparator)
+            val safeArtist = resolvedArtist.replace(ILLEGAL_FILENAME, "_").trim()
+            val safeTitle = song.title.replace(ILLEGAL_FILENAME, "_").trim()
             val safeName = buildString {
-                append(song.artist)
-                append(" - ")
-                append(song.title)
-            }.replace(ILLEGAL_FILENAME, "_").trim().take(180).ifBlank { song.videoId }
+                if (safeArtist.isNotEmpty()) append(safeArtist)
+                if (safeArtist.isNotEmpty() && safeTitle.isNotEmpty()) append(" - ")
+                if (safeTitle.isNotEmpty()) append(safeTitle)
+            }.take(180).trim().ifBlank { song.videoId }
             // A manifest is an index of the audio, not the audio: fetched as a file it saved a few
             // KB of XML as `.flac`. Its segments are fMP4, so it can only become FLAC or M4A.
             val manifest = DesktopManifestDownload.isManifest(stream)
@@ -249,6 +257,20 @@ object DesktopDownloadManager {
             "webm" -> "webm"
             else -> "m4a"
         }
+    }
+
+    fun resolveArtistsString(song: Song, separator: String): String {
+        val names = song.artists.map { it.name.trim() }.filter { it.isNotBlank() }
+        if (names.isNotEmpty()) return names.joinToString(separator)
+        return song.artist.trim().ifBlank { "Unknown Artist" }
+    }
+
+    fun resolveAlbumArtistString(song: Song): String {
+        val lead = song.artists.firstOrNull()?.name?.trim()?.takeIf { it.isNotBlank() }
+        if (lead != null) return lead
+        val firstSplit = song.artist.split(',', ';', '/', '&').firstOrNull()?.trim()
+        if (!firstSplit.isNullOrBlank()) return firstSplit
+        return song.artist.trim().ifBlank { "Unknown Artist" }
     }
 
     private const val HTTP_PARTIAL = 206

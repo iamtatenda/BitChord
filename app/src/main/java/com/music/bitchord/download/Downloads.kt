@@ -1034,7 +1034,7 @@ object Downloads {
                 // Save companion files (refreezer parity)
                 val trackStem = name.substringBeforeLast('.')
                 if (AppSettings.downloadSaveLrcLyrics.value && words != null) {
-                    val lrcContent = words.enhanced?.takeIf { it.isNotBlank() } ?: words.plain
+                    val lrcContent = words.plain?.takeIf { it.isNotBlank() } ?: words.enhanced
                     if (!lrcContent.isNullOrBlank()) {
                         DownloadStore.writeCompanion(
                             context,

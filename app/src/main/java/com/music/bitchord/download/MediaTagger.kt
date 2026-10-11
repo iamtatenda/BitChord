@@ -260,10 +260,10 @@ object MediaTagger {
         }
         
         // For standard formats (m4a, flac, mp3), use jaudiotagger for robust tagging
+        val tempFile = File(context.cacheDir, "tagging_temp_${track.videoId.hashCode()}_${System.nanoTime()}.$extension")
         try {
             // Write to a persistent cache file via streaming to avoid OOM
-            val tempFile = File(context.cacheDir, "tagging_temp." + extension)
-            context.contentResolver.openInputStream(uri)?.use { input ->
+            openInput(context, uri)?.use { input ->
                 tempFile.outputStream().use { output ->
                     input.copyTo(output)
                 }
@@ -279,7 +279,9 @@ object MediaTagger {
             tag.setField(org.jaudiotagger.tag.FieldKey.TITLE, track.title)
             tag.setField(org.jaudiotagger.tag.FieldKey.ARTIST, resolvedArtist)
             tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM_ARTIST, resolvedAlbumArtist)
-            tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM, track.albumName ?: "")
+            if (!track.albumName.isNullOrBlank()) {
+                tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM, track.albumName)
+            }
             
             if (artwork != null && artwork.bytes.isNotEmpty()) {
                 val newArtwork = org.jaudiotagger.tag.images.ArtworkFactory.getNew()
@@ -306,9 +308,10 @@ object MediaTagger {
                     }
                 }
             }
-            tempFile.delete()
         } catch (e: Exception) {
             Log.e("MediaTagger", "Failed to embed via jaudiotagger: " + e.message, e)
+        } finally {
+            tempFile.delete()
         }
     }
 

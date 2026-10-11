@@ -263,13 +263,62 @@ object DownloadStore {
                 }
             } == true
         } else if (android.provider.DocumentsContract.isDocumentUri(context, uri)) {
-            val doc = DocumentFile.fromSingleUri(context, uri)
-            val parent = doc?.parentFile
-            val name = doc?.name
-            if (parent != null && name != null) {
-                val stem = name.substringBeforeLast('.')
-                parent.findFile("$stem.lrc")?.delete()
-                parent.findFile("$stem.jpg")?.delete()
+            val (docName, docId) = runCatching {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(
+                        android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    ),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val name = cursor.getString(0)
+                        val id = cursor.getString(1)
+                        name to id
+                    } else null
+                }
+            }.getOrNull() ?: (null to null)
+
+            val finalDocName = docName ?: DocumentFile.fromSingleUri(context, uri)?.name
+            if (!finalDocName.isNullOrBlank()) {
+                val stem = finalDocName.substringBeforeLast('.')
+                if (docId != null && uri.authority != null) {
+                    val parentId = if (docId.contains('/')) docId.substringBeforeLast('/') else docId.substringBefore(':') + ":"
+                    val lrcId = "$parentId/$stem.lrc"
+                    val jpgId = "$parentId/$stem.jpg"
+                    val lrcUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, lrcId)
+                    val jpgUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, jpgId)
+                    runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, lrcUri) }
+                    runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, jpgUri) }
+                }
+
+                val safUriStr = AppSettings.downloadFolderUri.value
+                if (!safUriStr.isNullOrBlank()) {
+                    val rootPath = LocalMediaRepository.selectedFolderPath(safUriStr)
+                    if (!rootPath.isNullOrBlank()) {
+                        val rootDir = File(rootPath)
+                        if (rootDir.exists()) {
+                            rootDir.walkTopDown().maxDepth(4)
+                                .filter { it.isFile && (it.name == "$stem.lrc" || it.name == "$stem.jpg") }
+                                .forEach { runCatching { it.delete() } }
+                        }
+                    }
+                    runCatching {
+                        val rootDoc = DocumentFile.fromTreeUri(context, Uri.parse(safUriStr))
+                        if (rootDoc != null) {
+                            fun cleanTree(dir: DocumentFile, depth: Int) {
+                                if (depth <= 0) return
+                                dir.findFile("$stem.lrc")?.delete()
+                                dir.findFile("$stem.jpg")?.delete()
+                                dir.listFiles().filter { it.isDirectory }.forEach { cleanTree(it, depth - 1) }
+                            }
+                            cleanTree(rootDoc, 4)
+                        }
+                    }
+                }
             }
             android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
         } else {

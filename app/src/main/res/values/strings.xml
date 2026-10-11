@@ -1127,4 +1127,27 @@
     <string name="local_playlist_subtitle">%1$d songs · On this device</string>
     <string name="spotify_import_empty_playlist">No songs in this playlist</string>
     <string name="spotify_library_subtitle">Your Spotify playlists</string>
+
+    <!-- Download Customization & Metadata Storage (Refreezer Parity) -->
+    <string name="download_customization_title">Download Settings</string>
+    <string name="download_customization_subtitle">Folder structure, covers, lyrics and artist tags</string>
+    <string name="download_storage_section">Storage &amp; Folders</string>
+    <string name="download_folder_title">Download folder</string>
+    <string name="download_folder_default">Default (Music/BitChord)</string>
+    <string name="download_folder_custom_desc">Custom storage directory via Storage Access Framework</string>
+    <string name="download_folder_reset">Reset to default folder</string>
+    <string name="download_organize_folders_title">Organize in folders</string>
+    <string name="download_organize_folders_desc">Save tracks in &lt;Artist&gt;/&lt;Album&gt;/ folders</string>
+    <string name="download_create_nomedia_title">Create .nomedia file</string>
+    <string name="download_create_nomedia_desc">Hide downloaded artwork and tracks from gallery apps</string>
+    <string name="download_metadata_section">Metadata &amp; Companion Files</string>
+    <string name="download_save_album_cover_title">Save album cover</string>
+    <string name="download_save_album_cover_desc">Save cover.jpg in album folders for local players</string>
+    <string name="download_save_track_cover_title">Save track cover</string>
+    <string name="download_save_track_cover_desc">Save &lt;title&gt;.jpg alongside each song</string>
+    <string name="download_save_lrc_title">Save synced lyrics (.lrc)</string>
+    <string name="download_save_lrc_desc">Export line-synced lyrics for offline players</string>
+    <string name="download_artist_separator_title">Artist separator</string>
+    <string name="download_artist_separator_desc">Delimiter for multiple artists across audio tags</string>
+    <string name="download_export_active_folder">Saving to %1$s</string>
 </resources>

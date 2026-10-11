@@ -139,7 +139,7 @@ object LocalMediaRepository {
                     DownloadStore.FOLDER,
                 )
                 if (folder.exists() && folder.isDirectory) {
-                    folder.listFiles()?.forEach { file ->
+                    folder.walkTopDown().forEach { file ->
                         if (file.isFile && isAudioFileName(file.name)) {
                             val uriStr = Uri.fromFile(file).toString()
                             if (uriStr !in knownUris) {
@@ -315,20 +315,27 @@ object LocalMediaRepository {
     /** Human-readable path for the folder setting without exposing provider internals. */
     fun selectedFolderLabel(treeUri: String): String? = selectedFolder(treeUri)?.label
 
+    /** Decoded physical filesystem path for a SAF folder tree, preserving exact casing. */
+    fun selectedFolderPath(treeUri: String): String? = selectedFolder(treeUri)?.absolutePath
+
     internal fun isInSelectedFolder(path: String?, treeUri: String): Boolean {
         if (treeUri.isBlank()) return true
         val folder = selectedFolder(treeUri) ?: return false
         val candidate = path?.normalizedPath() ?: return false
-        return candidate == folder.absolutePath || candidate.startsWith("${folder.absolutePath}/")
+        return candidate == folder.normalizedPath || candidate.startsWith("${folder.normalizedPath}/")
     }
 
-    private data class SelectedFolder(val absolutePath: String, val label: String)
+    private data class SelectedFolder(
+        val absolutePath: String,
+        val label: String,
+        val normalizedPath: String = absolutePath.normalizedPath(),
+    )
 
     private fun selectedFolder(treeUri: String): SelectedFolder? = runCatching {
         val documentId = DocumentsContract.getTreeDocumentId(Uri.parse(treeUri))
         if (documentId.startsWith("raw:")) {
-            val path = documentId.removePrefix("raw:").normalizedPath()
-            return@runCatching SelectedFolder(path, path.substringAfterLast('/'))
+            val raw = documentId.removePrefix("raw:").replace('\\', '/').trimEnd('/')
+            return@runCatching SelectedFolder(raw, raw.substringAfterLast('/'))
         }
         val volume = documentId.substringBefore(':')
         val relative = documentId.substringAfter(':', "").trim('/')
@@ -337,8 +344,9 @@ object LocalMediaRepository {
         } else {
             "/storage/$volume"
         }
+        val exactPath = listOf(volumeRoot, relative).filter { it.isNotBlank() }.joinToString("/").replace('\\', '/').trimEnd('/')
         SelectedFolder(
-            absolutePath = listOf(volumeRoot, relative).filter { it.isNotBlank() }.joinToString("/").normalizedPath(),
+            absolutePath = exactPath,
             label = relative.ifBlank { volume },
         )
     }.getOrNull()

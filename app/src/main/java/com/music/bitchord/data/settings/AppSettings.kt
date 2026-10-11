@@ -208,6 +208,13 @@ object AppSettings {
      * not one portable audio file.
      */
     val exportDownloads = MutableStateFlow(false)
+    val downloadFolderUri = MutableStateFlow<String?>(null)
+    val downloadArtistSeparator = MutableStateFlow(", ")
+    val downloadOrganizeFolders = MutableStateFlow(false)
+    val downloadSaveAlbumCover = MutableStateFlow(true)
+    val downloadSaveTrackCover = MutableStateFlow(false)
+    val downloadCreateNomedia = MutableStateFlow(false)
+    val downloadSaveLrcLyrics = MutableStateFlow(true)
 
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
@@ -783,6 +790,13 @@ object AppSettings {
         downloadQuality.value = readDownloadQuality()
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
         exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, false)
+        downloadFolderUri.value = prefs.getString(KEY_DOWNLOAD_FOLDER_URI, null)?.takeIf { it.isNotBlank() }
+        downloadArtistSeparator.value = prefs.getString(KEY_DOWNLOAD_ARTIST_SEPARATOR, ", ").orEmpty().ifEmpty { ", " }
+        downloadOrganizeFolders.value = prefs.getBoolean(KEY_DOWNLOAD_ORGANIZE_FOLDERS, false)
+        downloadSaveAlbumCover.value = prefs.getBoolean(KEY_DOWNLOAD_SAVE_ALBUM_COVER, true)
+        downloadSaveTrackCover.value = prefs.getBoolean(KEY_DOWNLOAD_SAVE_TRACK_COVER, false)
+        downloadCreateNomedia.value = prefs.getBoolean(KEY_DOWNLOAD_CREATE_NOMEDIA, false)
+        downloadSaveLrcLyrics.value = prefs.getBoolean(KEY_DOWNLOAD_SAVE_LRC_LYRICS, true)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         automixPerformanceMode.value = runCatching {
@@ -1505,6 +1519,50 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_EXPORT_DOWNLOADS, value).apply()
     }
 
+    fun setDownloadFolderUri(value: String?) {
+        val normalized = value?.trim()?.takeIf { it.isNotBlank() }
+        downloadFolderUri.value = normalized
+        val editor = prefs.edit()
+        if (normalized != null) {
+            editor.putString(KEY_DOWNLOAD_FOLDER_URI, normalized)
+            setExportDownloads(true)
+        } else {
+            editor.remove(KEY_DOWNLOAD_FOLDER_URI)
+        }
+        editor.apply()
+    }
+
+    fun setDownloadArtistSeparator(value: String) {
+        val safe = value.ifEmpty { ", " }
+        downloadArtistSeparator.value = safe
+        prefs.edit().putString(KEY_DOWNLOAD_ARTIST_SEPARATOR, safe).apply()
+    }
+
+    fun setDownloadOrganizeFolders(value: Boolean) {
+        downloadOrganizeFolders.value = value
+        prefs.edit().putBoolean(KEY_DOWNLOAD_ORGANIZE_FOLDERS, value).apply()
+    }
+
+    fun setDownloadSaveAlbumCover(value: Boolean) {
+        downloadSaveAlbumCover.value = value
+        prefs.edit().putBoolean(KEY_DOWNLOAD_SAVE_ALBUM_COVER, value).apply()
+    }
+
+    fun setDownloadSaveTrackCover(value: Boolean) {
+        downloadSaveTrackCover.value = value
+        prefs.edit().putBoolean(KEY_DOWNLOAD_SAVE_TRACK_COVER, value).apply()
+    }
+
+    fun setDownloadCreateNomedia(value: Boolean) {
+        downloadCreateNomedia.value = value
+        prefs.edit().putBoolean(KEY_DOWNLOAD_CREATE_NOMEDIA, value).apply()
+    }
+
+    fun setDownloadSaveLrcLyrics(value: Boolean) {
+        downloadSaveLrcLyrics.value = value
+        prefs.edit().putBoolean(KEY_DOWNLOAD_SAVE_LRC_LYRICS, value).apply()
+    }
+
     fun setLastfmPrimaryArtistOnly(value: Boolean) {
         lastfmPrimaryArtistOnly.value = value
         prefs.edit().putBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, value).apply()
@@ -1895,6 +1953,7 @@ object AppSettings {
         "downloaded_tracks_metadata",
         "downloaded_collections",
         KEY_LOCAL_MUSIC_FOLDER_URI,
+        KEY_DOWNLOAD_FOLDER_URI,
         KEY_LAST_VERSION_CODE,
     )
 
@@ -1923,6 +1982,13 @@ object AppSettings {
     private const val KEY_QUALITY_DOWNLOAD = "audio_quality_download"
     private const val KEY_WIFI_ONLY_DOWNLOADS = "wifi_only_downloads"
     private const val KEY_EXPORT_DOWNLOADS = "export_downloads"
+    private const val KEY_DOWNLOAD_FOLDER_URI = "download_folder_uri"
+    private const val KEY_DOWNLOAD_ARTIST_SEPARATOR = "download_artist_separator"
+    private const val KEY_DOWNLOAD_ORGANIZE_FOLDERS = "download_organize_folders"
+    private const val KEY_DOWNLOAD_SAVE_ALBUM_COVER = "download_save_album_cover"
+    private const val KEY_DOWNLOAD_SAVE_TRACK_COVER = "download_save_track_cover"
+    private const val KEY_DOWNLOAD_CREATE_NOMEDIA = "download_create_nomedia"
+    private const val KEY_DOWNLOAD_SAVE_LRC_LYRICS = "download_save_lrc_lyrics"
     private const val KEY_LOSSLESS = "lossless_audio"
     private const val KEY_CROSSFADE = "crossfade_seconds"
     private const val KEY_SMART_FADE = "smart_fade_enabled"

@@ -8,6 +8,7 @@ import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
+import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
@@ -38,6 +39,21 @@ import kotlin.math.max
 object MediaTagger {
 
     private const val TAG = "BitChord"
+
+    fun resolveArtistsString(song: Song): String {
+        val separator = AppSettings.downloadArtistSeparator.value
+        val fromArtists = if (song.artists.isNotEmpty()) {
+            song.artists.map { it.name.trim() }.filter { it.isNotEmpty() }.joinToString(separator)
+        } else ""
+        return fromArtists.takeIf { it.isNotEmpty() }
+            ?: song.artist.trim().takeIf { it.isNotEmpty() }
+            ?: "Unknown Artist"
+    }
+
+    fun resolveAlbumArtistString(song: Song): String =
+        song.artists.firstOrNull()?.name?.trim()?.takeIf { it.isNotEmpty() }
+            ?: song.artist.trim().takeIf { it.isNotEmpty() }
+            ?: "Unknown Artist"
 
     /** Long side of the embedded cover — plenty for a lock screen or a car head unit, without ballooning the file. */
     private const val COVER_MAX_SIDE = 1000
@@ -209,10 +225,12 @@ object MediaTagger {
     ) {
         val plain = lyrics?.plain
         val words = lyrics?.enhanced
+        val resolvedArtist = resolveArtistsString(track)
+        val resolvedAlbumArtist = resolveAlbumArtistString(track)
         
         // Restore FLAC streaming optimization to prevent OOM
         if (extension == "flac" &&
-            tagFlacStreaming(context, uri, track, plain, words, artwork)
+            tagFlacStreaming(context, uri, track, plain, words, artwork, resolvedArtist, resolvedAlbumArtist)
         ) {
             return
         }
@@ -221,7 +239,17 @@ object MediaTagger {
         if (extension == "webm") {
             val original = readAll(context, uri) ?: return
             val tagged = runCatching {
-                WebmTagger.tag(original, track.title, track.artist, track.albumName, plain, artwork?.bytes, false, words)
+                WebmTagger.tag(
+                    bytes = original,
+                    title = track.title,
+                    artist = resolvedArtist,
+                    album = track.albumName,
+                    lyrics = plain,
+                    cover = artwork?.bytes,
+                    coverMime = artwork?.mime ?: "image/jpeg",
+                    wordLyrics = words,
+                    albumArtist = resolvedAlbumArtist,
+                )
             }.getOrDefault(original)
             if (tagged !== original) {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
@@ -249,7 +277,8 @@ object MediaTagger {
             }
             
             tag.setField(org.jaudiotagger.tag.FieldKey.TITLE, track.title)
-            tag.setField(org.jaudiotagger.tag.FieldKey.ARTIST, track.artists.joinToString(", ") { it.name })
+            tag.setField(org.jaudiotagger.tag.FieldKey.ARTIST, resolvedArtist)
+            tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM_ARTIST, resolvedAlbumArtist)
             tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM, track.albumName ?: "")
             
             if (artwork != null && artwork.bytes.isNotEmpty()) {
@@ -318,6 +347,8 @@ object MediaTagger {
         lyrics: String?,
         wordLyrics: String?,
         artwork: Artwork?,
+        resolvedArtist: String,
+        resolvedAlbumArtist: String,
     ): Boolean {
         val head = readPrefix(context, uri, FLAC_HEAD_BYTES) ?: return false
         // Short of the cap means the read hit the end of the file, so this *is*
@@ -325,14 +356,15 @@ object MediaTagger {
         // prefix that was cut too fine.
         val wholeFile = head.size < FLAC_HEAD_BYTES
         val rewrite = FlacTagger.header(
-            head,
-            track.title,
-            track.artist,
-            track.albumName,
-            lyrics,
-            artwork?.bytes,
-            artwork?.mime ?: "image/jpeg",
+            head = head,
+            title = track.title,
+            artist = resolvedArtist,
+            album = track.albumName,
+            lyrics = lyrics,
+            cover = artwork?.bytes,
+            coverMime = artwork?.mime ?: "image/jpeg",
             wordLyrics = wordLyrics,
+            albumArtist = resolvedAlbumArtist,
         ) ?: return wholeFile
 
         val temp = File(context.cacheDir, "tagging-${track.videoId.hashCode()}-${System.nanoTime()}.flac")

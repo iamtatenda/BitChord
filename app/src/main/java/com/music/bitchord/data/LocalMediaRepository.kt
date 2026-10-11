@@ -313,13 +313,15 @@ object LocalMediaRepository {
     }
 
     /** Human-readable path for the folder setting without exposing provider internals. */
-    fun selectedFolderLabel(treeUri: String): String? = selectedFolder(treeUri)?.label
+    fun selectedFolderLabel(treeUri: String?): String? =
+        if (treeUri.isNullOrBlank()) null else selectedFolder(treeUri)?.label
 
     /** Decoded physical filesystem path for a SAF folder tree, preserving exact casing. */
-    fun selectedFolderPath(treeUri: String): String? = selectedFolder(treeUri)?.absolutePath
+    fun selectedFolderPath(treeUri: String?): String? =
+        if (treeUri.isNullOrBlank()) null else selectedFolder(treeUri)?.absolutePath
 
-    internal fun isInSelectedFolder(path: String?, treeUri: String): Boolean {
-        if (treeUri.isBlank()) return true
+    internal fun isInSelectedFolder(path: String?, treeUri: String?): Boolean {
+        if (treeUri.isNullOrBlank()) return true
         val folder = selectedFolder(treeUri) ?: return false
         val candidate = path?.normalizedPath() ?: return false
         return candidate == folder.normalizedPath || candidate.startsWith("${folder.normalizedPath}/")

@@ -252,9 +252,25 @@ object DownloadStore {
                 val file = File(path)
                 if (file.name == "playlist.m3u8" && file.parentFile?.parentFile?.name == "offline-hls") {
                     file.parentFile?.deleteRecursively() == true
-                } else file.delete()
+                } else {
+                    val stem = file.nameWithoutExtension
+                    val parent = file.parentFile
+                    if (parent != null) {
+                        File(parent, "$stem.lrc").takeIf { it.exists() }?.delete()
+                        File(parent, "$stem.jpg").takeIf { it.exists() }?.delete()
+                    }
+                    file.delete()
+                }
             } == true
         } else if (android.provider.DocumentsContract.isDocumentUri(context, uri)) {
+            val doc = DocumentFile.fromSingleUri(context, uri)
+            val parent = doc?.parentFile
+            val name = doc?.name
+            if (parent != null && name != null) {
+                val stem = name.substringBeforeLast('.')
+                parent.findFile("$stem.lrc")?.delete()
+                parent.findFile("$stem.jpg")?.delete()
+            }
             android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
         } else {
             context.contentResolver.delete(uri, null, null) > 0
@@ -457,8 +473,7 @@ object DownloadStore {
                     }
                     return
                 } else {
-                    Log.w(TAG, "Configured SAF folder is inaccessible or non-writable ($safUriStr); skipping companion files")
-                    return
+                    Log.w(TAG, "Configured SAF folder is inaccessible or non-writable ($safUriStr); falling back to default storage")
                 }
             }
 
@@ -477,21 +492,19 @@ object DownloadStore {
                 return
             }
 
-            // Mode 3: Legacy Public Storage (API 26-28)
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                val base = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER)
-                val dir = if (subfolder.isNullOrEmpty()) base else File(base, subfolder)
-                if (!dir.exists()) dir.mkdirs()
-                val target = File(dir, fileName)
-                if (target.exists()) {
-                    if (fileName == ".nomedia" || (fileName == "cover.jpg" && target.length() == bytes.size.toLong())) {
-                        return
-                    }
+            // Mode 3: Shared Public Storage (Legacy & Direct File System in Music/BitChord)
+            val base = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER)
+            val dir = if (subfolder.isNullOrEmpty()) base else File(base, subfolder)
+            if (!dir.exists()) dir.mkdirs()
+            val target = File(dir, fileName)
+            if (target.exists()) {
+                if (fileName == ".nomedia" || (fileName == "cover.jpg" && target.length() == bytes.size.toLong())) {
+                    return
                 }
-                target.writeBytes(bytes)
-                if (!fileName.startsWith(".")) {
-                    MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
-                }
+            }
+            target.writeBytes(bytes)
+            if (!fileName.startsWith(".")) {
+                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
             }
         }.onFailure { Log.w(TAG, "Companion write non-fatal failure for $fileName: ${it.message}") }
     }

@@ -2231,7 +2231,7 @@ private fun DownloadOptionsSheet() {
                     onClick = { folderPicker.launch(null) },
                 )
 
-                if (downloadFolderUri.isNotBlank()) {
+                if (!downloadFolderUri.isNullOrBlank()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

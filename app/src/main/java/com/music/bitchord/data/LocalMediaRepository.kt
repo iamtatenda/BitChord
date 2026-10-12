@@ -240,18 +240,21 @@ object LocalMediaRepository {
         }
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
-        val contentUris = mutableListOf(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+        val contentUris = mutableListOf<Uri>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
                 val volumes = MediaStore.getExternalVolumeNames(context)
                 for (vol in volumes) {
-                    val u = MediaStore.Audio.Media.getContentUri(vol)
-                    if (u !in contentUris) contentUris.add(u)
+                    contentUris.add(MediaStore.Audio.Media.getContentUri(vol))
                 }
             }
         }
+        if (contentUris.isEmpty()) {
+            contentUris.add(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+        }
 
         val seenUris = mutableSetOf<String>()
+        val seenPaths = mutableSetOf<String>()
         for (volumeUri in contentUris) {
             runCatching {
                 context.contentResolver.query(
@@ -283,6 +286,9 @@ object LocalMediaRepository {
                     val albumId = cursor.getLong(albumIdCol)
                     val durationMs = cursor.getLong(durationCol)
                     val path = cursor.getString(dataCol)
+
+                    val norm = path?.normalizedPath()
+                    if (norm != null && !seenPaths.add(norm)) continue
 
                     if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
                     if (!isInSelectedFolder(path, AppSettings.localMusicFolderUri.value)) continue
@@ -388,8 +394,9 @@ object LocalMediaRepository {
                         val path = cursor.getString(dataCol)
                         val contentUri = ContentUris.withAppendedId(filesVolumeUri, id).toString()
 
-                        if (contentUri in seenUris) continue
                         val norm = path?.normalizedPath()
+                        if (norm != null && !seenPaths.add(norm)) continue
+                        if (!seenUris.add(contentUri)) continue
 
                         if (filterNonMusic && !isEligibleLocalMusic(0, name, path)) continue
                         if (!isInSelectedFolder(path, AppSettings.localMusicFolderUri.value)) continue
@@ -399,7 +406,6 @@ object LocalMediaRepository {
                             if (f.exists() && f.isFile) {
                                 val song = buildSongFromFile(context, f)
                                 if (song != null) {
-                                    seenUris.add(contentUri)
                                     songs.add(song.copy(localUri = contentUri))
                                     continue
                                 }
@@ -410,13 +416,12 @@ object LocalMediaRepository {
                         val added = cursor.getLong(addedCol)
                         val modified = cursor.getLong(modCol)
 
-                        seenUris.add(contentUri)
                         songs.add(
                             Song(
                                 videoId = contentUri,
                                 title = title,
                                 artist = "Unknown Artist",
-                                thumbnailUrl = null,
+                                thumbnailUrl = "audio:$contentUri",
                                 durationText = null,
                                 albumName = null,
                                 localUri = contentUri,
@@ -430,11 +435,8 @@ object LocalMediaRepository {
             }.onFailure { Log.w(TAG, "Failed scanning MediaStore.Files on $filesVolumeUri: ${it.message}") }
         }
 
-        // Also perform direct file discovery on selected folder and standard music paths
+        // Direct file discovery on selected folder and standard music paths
         // to find songs not indexed by Android's system MediaScanner (Namida parity).
-        val knownUris = songs.mapNotNull { it.localUri }.toMutableSet()
-        val knownPaths = songs.mapNotNull { it.localPath?.normalizedPath() }.toMutableSet()
-
         val selectedUri = AppSettings.localMusicFolderUri.value
         val selectedPath = selectedFolderPath(selectedUri)
         val targetFolders = mutableListOf<File>()
@@ -498,13 +500,12 @@ object LocalMediaRepository {
                 folder.walkTopDown().maxDepth(15).forEach { file ->
                     if (file.isFile && isAudioFileName(file.name)) {
                         val norm = file.absolutePath.normalizedPath()
-                        if (norm !in knownPaths) {
+                        if (seenPaths.add(norm)) {
                             if (filterNonMusic && !isEligibleLocalMusic(0, file.name, file.absolutePath)) return@forEach
                             val song = buildSongFromFile(context, file)
                             if (song != null) {
-                                knownPaths.add(norm)
                                 val u = song.localUri ?: return@forEach
-                                if (knownUris.add(u)) {
+                                if (seenUris.add(u)) {
                                     songs.add(song)
                                 }
                             }
@@ -565,9 +566,9 @@ object LocalMediaRepository {
                         val (docId, name, mod) = item
                         val docUri = DocumentsContract.buildDocumentUriUsingTree(parsedUri, docId)
                         val uriStr = docUri.toString()
-                        if (uriStr !in knownUris) {
+                        if (seenUris.add(uriStr)) {
                             val song = buildSongFromSaf(context, docUri, name, mod, folderCoverUri)
-                            if (song != null && knownUris.add(uriStr)) {
+                            if (song != null) {
                                 songs.add(song)
                             }
                         }
@@ -582,7 +583,9 @@ object LocalMediaRepository {
             }.onFailure { Log.w(TAG, "Fast SAF tree scan failed: ${it.message}") }
         }
 
-        songs
+        songs.distinctBy { song ->
+            song.localPath?.normalizedPath() ?: song.localUri ?: song.videoId
+        }
     }
 
     /** Human-readable path for the folder setting without exposing provider internals. */
@@ -595,14 +598,11 @@ object LocalMediaRepository {
 
     internal fun isInSelectedFolder(path: String?, treeUri: String?): Boolean {
         if (treeUri.isNullOrBlank()) return true
-        val folder = selectedFolder(treeUri) ?: return true
-        if (path.isNullOrBlank()) return true
+        if (path.isNullOrBlank()) return false
+        val folder = selectedFolder(treeUri) ?: return false
         val candidate = path.normalizedPath()
         val target = folder.normalizedPath
-        if (candidate == target || candidate.startsWith("$target/")) return true
-        val rel = folder.label.lowercase(Locale.ROOT)
-        if (rel.isNotBlank() && candidate.contains("/$rel/")) return true
-        return false
+        return candidate == target || candidate.startsWith("$target/")
     }
 
     private data class SelectedFolder(
@@ -711,15 +711,6 @@ object LocalMediaRepository {
             if (!metaArtist.isNullOrBlank()) artist = metaArtist
             albumName = metaAlbum.cleanTag()
             if (metaDur != null && metaDur > 0) durationText = formatDuration(metaDur)
-            if (artworkUrl == null) {
-                val pic = retriever.embeddedPicture
-                if (pic != null && pic.isNotEmpty()) {
-                    val artDir = File(context.cacheDir, "local_art").apply { mkdirs() }
-                    val artFile = File(artDir, "${uriStr.hashCode()}.jpg")
-                    if (!artFile.exists()) runCatching { artFile.writeBytes(pic) }
-                    if (artFile.exists()) artworkUrl = Uri.fromFile(artFile).toString()
-                }
-            }
             retriever.release()
         }
 
@@ -727,7 +718,7 @@ object LocalMediaRepository {
             videoId = uriStr,
             title = title,
             artist = artist,
-            thumbnailUrl = artworkUrl,
+            thumbnailUrl = artworkUrl ?: "audio:$uriStr",
             durationText = durationText,
             albumName = albumName ?: scanned?.albumName,
             localUri = uriStr,
@@ -779,13 +770,6 @@ object LocalMediaRepository {
             if (metaDur != null && metaDur > 0) {
                 durationText = formatDuration(metaDur)
             }
-            val pic = retriever.embeddedPicture
-            if (pic != null && pic.isNotEmpty()) {
-                val artDir = File(context.cacheDir, "local_art").apply { mkdirs() }
-                val artFile = File(artDir, "${path.hashCode()}.jpg")
-                if (!artFile.exists()) runCatching { artFile.writeBytes(pic) }
-                if (artFile.exists()) extractedArt = Uri.fromFile(artFile).toString()
-            }
             retriever.release()
         }
 
@@ -796,7 +780,7 @@ object LocalMediaRepository {
             videoId = fileUri,
             title = title,
             artist = artist,
-            thumbnailUrl = extractedArt ?: folderArt,
+            thumbnailUrl = folderArt ?: "audio:$fileUri",
             durationText = durationText,
             albumName = album,
             localUri = fileUri,
@@ -820,7 +804,6 @@ object LocalMediaRepository {
         var artist = "Unknown Artist"
         var album: String? = null
         var durationText: String? = null
-        var artworkUrl: String? = null
 
         runCatching {
             val retriever = MediaMetadataRetriever()
@@ -836,13 +819,6 @@ object LocalMediaRepository {
             if (metaDur != null && metaDur > 0) {
                 durationText = formatDuration(metaDur)
             }
-            val pic = retriever.embeddedPicture
-            if (pic != null && pic.isNotEmpty()) {
-                val artDir = File(context.cacheDir, "local_art").apply { mkdirs() }
-                val artFile = File(artDir, "${uri.toString().hashCode()}.jpg")
-                if (!artFile.exists()) runCatching { artFile.writeBytes(pic) }
-                if (artFile.exists()) artworkUrl = Uri.fromFile(artFile).toString()
-            }
             retriever.release()
         }
 
@@ -853,7 +829,7 @@ object LocalMediaRepository {
             videoId = uriStr,
             title = title,
             artist = artist,
-            thumbnailUrl = artworkUrl ?: folderArtUri,
+            thumbnailUrl = folderArtUri ?: "audio:$uriStr",
             durationText = durationText,
             albumName = album,
             localUri = uriStr,

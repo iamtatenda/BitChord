@@ -93,10 +93,10 @@ class LocalMediaFilterTest {
     }
 
     @Test
-    fun isInSelectedFolderPermissiveOnNullOrBlankPaths() {
+    fun isInSelectedFolderRejectsNullOrBlankPathsWhenFolderSet() {
         val treeUri = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
-        assertTrue(LocalMediaRepository.isInSelectedFolder(null, treeUri))
-        assertTrue(LocalMediaRepository.isInSelectedFolder("", treeUri))
+        assertFalse(LocalMediaRepository.isInSelectedFolder(null, treeUri))
+        assertFalse(LocalMediaRepository.isInSelectedFolder("", treeUri))
         assertTrue(LocalMediaRepository.isInSelectedFolder("/storage/emulated/0/Music/Song.mp3", null))
         assertTrue(LocalMediaRepository.isInSelectedFolder("/storage/emulated/0/Music/Song.mp3", ""))
     }

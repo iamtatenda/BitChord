@@ -183,6 +183,8 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
                 // Covers filed on the SMB share; anything else falls
                 // through to Coil's own fetchers. See SmbCoverFetcher.
                 add(SmbCoverFetcher.Factory())
+                // Embedded cover art on local audio files decoded lazily on demand
+                add(com.music.bitchord.data.LocalAudioCoverFetcher.Factory(this))
             }
             .memoryCache {
                 MemoryCache.Builder()

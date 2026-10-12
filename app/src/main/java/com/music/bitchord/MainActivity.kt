@@ -1905,16 +1905,43 @@ private fun BitChordApp(
             Toast.makeText(context, context.getString(R.string.storage_required_read), Toast.LENGTH_SHORT).show()
         }
     }
+    val manageStorageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (LocalMediaRepository.hasStoragePermission(context)) {
+            viewModel.reloadLocalDetail("local:all")
+            viewModel.reloadLocalDetail("local:downloads")
+            viewModel.loadLibrarySongs()
+        }
+    }
     val mediaPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
     } else {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
+    val requestStoragePermission: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !android.os.Environment.isExternalStorageManager()) {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            try {
+                manageStorageLauncher.launch(intent)
+            } catch (e: Exception) {
+                try {
+                    manageStorageLauncher.launch(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                } catch (e2: Exception) {
+                    mediaPermissionLauncher.launch(mediaPermission)
+                }
+            }
+        } else {
+            mediaPermissionLauncher.launch(mediaPermission)
+        }
+    }
     // The Search tab's Library source reads the Local Music folder, so it asks
     // for the same permission opening that folder does.
     val onSearchSourceChange: (SearchSource) -> Unit = { source ->
         if (source == SearchSource.LIBRARY && !LocalMediaRepository.hasStoragePermission(context)) {
-            mediaPermissionLauncher.launch(mediaPermission)
+            requestStoragePermission()
         }
         viewModel.setSearchSource(source)
     }
@@ -1927,7 +1954,7 @@ private fun BitChordApp(
                 return@let
             }
             if ((id == "local:all" || id == "local:downloads") && !LocalMediaRepository.hasStoragePermission(context)) {
-                mediaPermissionLauncher.launch(mediaPermission)
+                requestStoragePermission()
             }
             // Left set rather than cleared: a card opened from a shelf's
             // "Show all" page stacks a detail page over it exactly as one

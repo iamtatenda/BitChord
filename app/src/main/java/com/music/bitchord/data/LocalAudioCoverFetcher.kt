@@ -10,9 +10,9 @@ import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
-import okio.Buffer
 import okio.FileSystem
-import java.io.File
+import okio.buffer
+import okio.source
 
 /**
  * Lazily extracts embedded cover art from local audio files on-demand for Coil.
@@ -43,10 +43,10 @@ class LocalAudioCoverFetcher(
                 retriever.setDataSource(context, uri)
             }
             retriever.embeddedPicture
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
             null
         } finally {
-            try { retriever.release() } catch (_: Throwable) {}
+            try { retriever.release() } catch (e: Throwable) {}
         } ?: throw java.io.FileNotFoundException("No embedded artwork found for $rawUri")
 
         val mimeType = if (pic.size >= 8 &&
@@ -60,9 +60,8 @@ class LocalAudioCoverFetcher(
             "image/jpeg"
         }
 
-        val buffer = Buffer().write(pic)
         return SourceFetchResult(
-            source = ImageSource(buffer, FileSystem.SYSTEM),
+            source = ImageSource(pic.inputStream().source().buffer(), FileSystem.SYSTEM),
             mimeType = mimeType,
             dataSource = DataSource.DISK,
         )

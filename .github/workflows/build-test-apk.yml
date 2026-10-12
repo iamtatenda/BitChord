@@ -37,39 +37,58 @@ jobs:
 
       - name: Build Dev Debug APK
         run: |
+          set -o pipefail
           ./gradlew assembleDevDebug --stacktrace 2>&1 | tee build.log
 
       - name: Show Compiler Errors on Failure
-        if: failure()
+        if: always()
         run: |
-          echo "==== GRADLE BUILD LOG (LAST 150 LINES) ===="
-          tail -n 150 build.log
+          if [ -f build.log ]; then
+            echo "==== COMPILER / BUILD ERRORS (GREP) ===="
+            grep -E "(e: |error:|FAILED|FAILURE:|Compilation error)" build.log -B 2 -A 5 | head -n 100 || true
+            echo "==== GRADLE BUILD LOG (LAST 150 LINES) ===="
+            tail -n 150 build.log
+          fi
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: build.log
 
       - name: Prepare APKs
         run: |
           mkdir -p dist-apk
-          echo "All generated APKs:"
-          find app/build/outputs/apk -name "*.apk" -ls
+          if [ -d app/build/outputs/apk ]; then
+            echo "All generated APKs:"
+            find app/build/outputs/apk -name "*.apk" -ls
 
-          for f in $(find app/build/outputs/apk -name "*.apk"); do
-            base=$(basename "$f")
-            if [[ "$base" == *"universal"* ]]; then
-              cp "$f" dist-apk/BitChord-dev-debug.apk
-            elif [[ "$base" == *"arm64"* ]]; then
-              cp "$f" dist-apk/BitChord-dev-arm64-v8a-debug.apk
-            fi
-          done
+            for f in $(find app/build/outputs/apk -name "*.apk"); do
+              base=$(basename "$f")
+              if [[ "$base" == *"universal"* ]]; then
+                cp "$f" dist-apk/BitChord-dev-debug.apk
+              elif [[ "$base" == *"arm64"* ]]; then
+                cp "$f" dist-apk/BitChord-dev-arm64-v8a-debug.apk
+              fi
+            done
 
-          # Fallback: ensure BitChord-dev-debug.apk is present
-          if [ ! -f dist-apk/BitChord-dev-debug.apk ]; then
-            first_apk=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
-            if [ -n "$first_apk" ]; then
-              cp "$first_apk" dist-apk/BitChord-dev-debug.apk
+            # Fallback: ensure BitChord-dev-debug.apk is present
+            if [ ! -f dist-apk/BitChord-dev-debug.apk ]; then
+              first_apk=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+              if [ -n "$first_apk" ]; then
+                cp "$first_apk" dist-apk/BitChord-dev-debug.apk
+              fi
             fi
           fi
 
           echo "Prepared release APKs:"
           ls -lh dist-apk/
+
+          if [ ! -f dist-apk/BitChord-dev-debug.apk ]; then
+            echo "::error::BitChord-dev-debug.apk was not generated. Check the Gradle build log above."
+            exit 1
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

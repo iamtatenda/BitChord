@@ -795,9 +795,10 @@ object LocalMediaRepository {
         if (candidate.artist != "Unknown Artist" && candidate.artist.isNotBlank()) scoreCandidate += 1
         if (current.artist != "Unknown Artist" && current.artist.isNotBlank()) scoreCurrent += 1
         if (!candidate.localPath.isNullOrBlank()) scoreCandidate += 1
-        if (!current.localPath.isNullOrBlank()) scoreCurrent += 1
-        if (candidate.thumbnailUrl != null && !candidate.thumbnailUrl.startsWith("audio:")) scoreCandidate += 1
-        if (current.thumbnailUrl != null && !current.thumbnailUrl.startsWith("audio:")) scoreCurrent += 1
+        val candThumb = candidate.thumbnailUrl
+        if (candThumb != null && !candThumb.startsWith("audio:")) scoreCandidate += 1
+        val currThumb = current.thumbnailUrl
+        if (currThumb != null && !currThumb.startsWith("audio:")) scoreCurrent += 1
         return scoreCandidate > scoreCurrent
     }
 

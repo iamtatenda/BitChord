@@ -107,5 +107,21 @@ class LocalMediaFilterTest {
         assertTrue(LocalMediaRepository.isInSelectedFolder("/storage/1234-5678/Music/Song.mp3", sdTreeUri))
         assertFalse(LocalMediaRepository.isInSelectedFolder("/storage/1234-5678/Podcasts/Song.mp3", sdTreeUri))
     }
+
+    @Test
+    fun resolvePhysicalPathDecodesPrimarySdCardAndRawDocIds() {
+        org.junit.Assert.assertEquals(
+            "/storage/emulated/0/Music/Album/Song.mp3",
+            LocalMediaRepository.resolvePhysicalPath("primary:Music/Album/Song.mp3"),
+        )
+        org.junit.Assert.assertEquals(
+            "/storage/1234-5678/Music/Song.flac",
+            LocalMediaRepository.resolvePhysicalPath("1234-5678:Music/Song.flac"),
+        )
+        org.junit.Assert.assertEquals(
+            "/storage/emulated/0/Music/Song.m4a",
+            LocalMediaRepository.resolvePhysicalPath("raw:/storage/emulated/0/Music/Song.m4a"),
+        )
+    }
 }
 

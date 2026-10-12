@@ -112,20 +112,13 @@ object LocalMediaRepository {
                     val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                     val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                     val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
-                    val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
-
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         val name = cursor.getString(nameCol) ?: continue
                         val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
-                        val albumId = cursor.getLong(albumIdCol)
                         val tags = ScannedTags(
                             albumName = cursor.getString(albumCol).cleanTag(),
-                            artworkUrl = if (albumId > 0) {
-                                ContentUris.withAppendedId(albumArtBaseUri, albumId).toString()
-                            } else {
-                                null
-                            },
+                            artworkUrl = "audio:$contentUri",
                             dateAddedSeconds = cursor.getLong(dateAddedCol),
                             dateModifiedSeconds = cursor.getLong(dateModifiedCol),
                         )
@@ -275,17 +268,21 @@ object LocalMediaRepository {
                 val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
 
-                val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
-
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
                     val displayName = cursor.getString(displayNameCol).orEmpty()
                     val rawTitle = cursor.getString(titleCol)
                     val rawArtist = cursor.getString(artistCol)
                     val rawAlbum = cursor.getString(albumCol)
-                    val albumId = cursor.getLong(albumIdCol)
                     val durationMs = cursor.getLong(durationCol)
                     val path = cursor.getString(dataCol)
+
+                    if (path != null && !File(path).exists()) {
+                        val existsInMediaStore = runCatching {
+                            context.contentResolver.openAssetFileDescriptor(ContentUris.withAppendedId(volumeUri, id), "r")?.use { true } ?: false
+                        }.getOrDefault(false)
+                        if (!existsInMediaStore) continue
+                    }
 
                     val norm = path?.normalizedPath()
                     if (norm != null && !seenPaths.add(norm)) continue
@@ -312,8 +309,7 @@ object LocalMediaRepository {
                                 ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
                         } else null
                     }
-                    val mediaStoreArt = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else null
-                    val artworkUrl = mediaStoreArt ?: folderArt
+                    val artworkUrl = folderArt ?: "audio:$contentUri"
                     val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
 
                     songs.add(
@@ -564,10 +560,14 @@ object LocalMediaRepository {
 
                     for (item in audioItems) {
                         val (docId, name, mod) = item
+                        val resolvedPath = resolvePhysicalPath(docId)
+                        val normPath = resolvedPath?.normalizedPath()
+                        if (normPath != null && !seenPaths.add(normPath)) continue
+
                         val docUri = DocumentsContract.buildDocumentUriUsingTree(parsedUri, docId)
                         val uriStr = docUri.toString()
                         if (seenUris.add(uriStr)) {
-                            val song = buildSongFromSaf(context, docUri, name, mod, folderCoverUri)
+                            val song = buildSongFromSaf(context, docUri, name, mod, folderCoverUri, resolvedPath)
                             if (song != null) {
                                 songs.add(song)
                             }
@@ -611,26 +611,42 @@ object LocalMediaRepository {
         val normalizedPath: String = absolutePath.normalizedPath(),
     )
 
+    internal fun resolvePhysicalPath(docId: String): String? = runCatching {
+        val decodedId = runCatching { java.net.URLDecoder.decode(docId, "UTF-8") }.getOrDefault(docId)
+        if (decodedId.startsWith("raw:")) {
+            return@runCatching decodedId.removePrefix("raw:").replace('\\', '/').trimEnd('/')
+        }
+        if (':' in decodedId) {
+            val volume = decodedId.substringBefore(':')
+            val relative = decodedId.substringAfter(':', "").trim('/')
+            val volumeRoot = if (volume.equals("primary", ignoreCase = true)) {
+                "/storage/emulated/0"
+            } else {
+                "/storage/$volume"
+            }
+            return@runCatching listOf(volumeRoot, relative).filter { it.isNotBlank() }.joinToString("/").replace('\\', '/').trimEnd('/')
+        }
+        null
+    }.getOrNull()
+
     private fun selectedFolder(treeUri: String): SelectedFolder? = runCatching {
         val parsedUri = Uri.parse(treeUri)
         val rawDocId = runCatching { DocumentsContract.getTreeDocumentId(parsedUri) }.getOrNull()
             ?: parsedUri.lastPathSegment.orEmpty()
-        val documentId = runCatching { java.net.URLDecoder.decode(rawDocId, "UTF-8") }.getOrDefault(rawDocId)
-        if (documentId.startsWith("raw:")) {
-            val raw = documentId.removePrefix("raw:").replace('\\', '/').trimEnd('/')
-            return@runCatching SelectedFolder(raw, raw.substringAfterLast('/'))
-        }
-        val volume = documentId.substringBefore(':')
-        val relative = documentId.substringAfter(':', "").trim('/')
-        val volumeRoot = if (volume.equals("primary", ignoreCase = true)) {
-            "/storage/emulated/0"
+        val exactPath = resolvePhysicalPath(rawDocId) ?: return@runCatching null
+        val decodedId = runCatching { java.net.URLDecoder.decode(rawDocId, "UTF-8") }.getOrDefault(rawDocId)
+        val label = if (decodedId.startsWith("raw:")) {
+            exactPath.substringAfterLast('/')
+        } else if (':' in decodedId) {
+            val relative = decodedId.substringAfter(':', "").trim('/')
+            val volume = decodedId.substringBefore(':')
+            relative.ifBlank { volume }
         } else {
-            "/storage/$volume"
+            exactPath.substringAfterLast('/')
         }
-        val exactPath = listOf(volumeRoot, relative).filter { it.isNotBlank() }.joinToString("/").replace('\\', '/').trimEnd('/')
         SelectedFolder(
             absolutePath = exactPath,
-            label = relative.ifBlank { volume },
+            label = label,
         )
     }.getOrNull()
 
@@ -796,6 +812,7 @@ object LocalMediaRepository {
         name: String,
         lastModifiedMs: Long,
         folderArtUri: String? = null,
+        physicalPath: String? = null,
     ): Song? {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
@@ -833,7 +850,7 @@ object LocalMediaRepository {
             durationText = durationText,
             albumName = album,
             localUri = uriStr,
-            localPath = null,
+            localPath = physicalPath,
             localDateAddedSeconds = modified,
             localDateModifiedSeconds = modified,
         )
@@ -845,6 +862,10 @@ object LocalMediaRepository {
         folderArtUri: String? = null,
     ): Song? {
         val name = doc.name ?: return null
-        return buildSongFromSaf(context, doc.uri, name, doc.lastModified(), folderArtUri)
+        val resolvedPath = runCatching {
+            val docId = DocumentsContract.getDocumentId(doc.uri)
+            resolvePhysicalPath(docId)
+        }.getOrNull()
+        return buildSongFromSaf(context, doc.uri, name, doc.lastModified(), folderArtUri, resolvedPath)
     }
 }

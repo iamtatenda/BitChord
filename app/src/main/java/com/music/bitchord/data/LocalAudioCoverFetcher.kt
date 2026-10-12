@@ -28,9 +28,16 @@ class LocalAudioCoverFetcher(
         val uri = Uri.parse(rawUri)
         val retriever = MediaMetadataRetriever()
         val pic = try {
-            if (uri.scheme == "file") {
-                val path = uri.path ?: return null
-                retriever.setDataSource(path)
+            val directPath = if (uri.scheme == "file") {
+                uri.path
+            } else if (uri.scheme.isNullOrBlank() || rawUri.startsWith("/")) {
+                rawUri
+            } else {
+                null
+            }
+
+            if (directPath != null) {
+                retriever.setDataSource(directPath)
             } else {
                 retriever.setDataSource(context, uri)
             }
@@ -41,10 +48,21 @@ class LocalAudioCoverFetcher(
             try { retriever.release() } catch (_: Throwable) {}
         } ?: return null
 
+        val mimeType = if (pic.size >= 8 &&
+            pic[0] == 0x89.toByte() &&
+            pic[1] == 0x50.toByte() &&
+            pic[2] == 0x4E.toByte() &&
+            pic[3] == 0x47.toByte()
+        ) {
+            "image/png"
+        } else {
+            "image/jpeg"
+        }
+
         val buffer = Buffer().write(pic)
         return SourceFetchResult(
             source = ImageSource(buffer, context),
-            mimeType = "image/jpeg",
+            mimeType = mimeType,
             dataSource = DataSource.DISK,
         )
     }

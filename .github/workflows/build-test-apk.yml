@@ -36,7 +36,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Dev Debug APK
-        run: ./gradlew assembleDevDebug --stacktrace
+        run: |
+          ./gradlew assembleDevDebug --stacktrace 2>&1 | tee build.log
+
+      - name: Show Compiler Errors on Failure
+        if: failure()
+        run: |
+          echo "==== GRADLE BUILD LOG (LAST 150 LINES) ===="
+          tail -n 150 build.log
 
       - name: Prepare APKs
         run: |

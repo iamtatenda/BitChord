@@ -68,10 +68,10 @@ class LocalAudioCoverFetcher(
         )
     }
 
-    class Factory(private val context: Context) : Fetcher.Factory<String> {
+    class Factory : Fetcher.Factory<String> {
         override fun create(data: String, options: Options, imageLoader: ImageLoader): Fetcher? {
             if (data.startsWith("audio:")) {
-                return LocalAudioCoverFetcher(context, data)
+                return LocalAudioCoverFetcher(options.context, data)
             }
             return null
         }

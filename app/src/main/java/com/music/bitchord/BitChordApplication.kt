@@ -184,7 +184,7 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
                 // through to Coil's own fetchers. See SmbCoverFetcher.
                 add(SmbCoverFetcher.Factory())
                 // Embedded cover art on local audio files decoded lazily on demand
-                add(com.music.bitchord.data.LocalAudioCoverFetcher.Factory(this))
+                add(com.music.bitchord.data.LocalAudioCoverFetcher.Factory())
             }
             .memoryCache {
                 MemoryCache.Builder()

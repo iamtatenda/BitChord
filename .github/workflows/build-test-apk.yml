@@ -35,71 +35,103 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Dev and Prod Debug APKs
-        run: ./gradlew assembleDevDebug assembleProdDebug
+      - name: Build Dev Debug APK
+        run: ./gradlew assembleDevDebug
 
       - name: Prepare APKs
         run: |
           mkdir -p dist-apk
-          # Copy ABI-split and universal APKs for dev flavor
-          for f in app/build/outputs/apk/dev/debug/*.apk; do
-            [ -e "$f" ] || continue
-            base=$(basename "$f")
-            newname=$(echo "$base" | sed 's/^app-dev-/BitChord-dev-/')
-            cp "$f" "dist-apk/$newname"
-          done
-
-          # If universal apk is present, alias it to BitChord-dev-debug.apk for 1-tap download
-          if [ -f dist-apk/BitChord-dev-universal-debug.apk ]; then
-            cp dist-apk/BitChord-dev-universal-debug.apk dist-apk/BitChord-dev-debug.apk
-          elif [ -f dist-apk/BitChord-dev-arm64-v8a-debug.apk ]; then
-            cp dist-apk/BitChord-dev-arm64-v8a-debug.apk dist-apk/BitChord-dev-debug.apk
+          # Prefer the universal APK for side-by-side dev testing on all devices
+          if [ -f app/build/outputs/apk/dev/debug/app-dev-universal-debug.apk ]; then
+            cp app/build/outputs/apk/dev/debug/app-dev-universal-debug.apk dist-apk/BitChord-dev-debug.apk
+          elif [ -f app/build/outputs/apk/dev/debug/app-dev-arm64-v8a-debug.apk ]; then
+            cp app/build/outputs/apk/dev/debug/app-dev-arm64-v8a-debug.apk dist-apk/BitChord-dev-debug.apk
           fi
 
-          # Copy ABI-split and universal APKs for prod flavor
-          for f in app/build/outputs/apk/prod/debug/*.apk; do
-            [ -e "$f" ] || continue
-            base=$(basename "$f")
-            newname=$(echo "$base" | sed 's/^app-prod-/BitChord-prod-/')
-            cp "$f" "dist-apk/$newname"
-          done
-
-          if [ -f dist-apk/BitChord-prod-universal-debug.apk ]; then
-            cp dist-apk/BitChord-prod-universal-debug.apk dist-apk/BitChord-prod-debug.apk
-          elif [ -f dist-apk/BitChord-prod-arm64-v8a-debug.apk ]; then
-            cp dist-apk/BitChord-prod-arm64-v8a-debug.apk dist-apk/BitChord-prod-debug.apk
+          # Also keep the smaller arm64-v8a slice if present
+          if [ -f app/build/outputs/apk/dev/debug/app-dev-arm64-v8a-debug.apk ]; then
+            cp app/build/outputs/apk/dev/debug/app-dev-arm64-v8a-debug.apk dist-apk/BitChord-dev-arm64-v8a-debug.apk
           fi
 
           echo "Prepared APKs:"
           ls -lh dist-apk/
 
-      - name: Upload APK Artifacts
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bitchord-test-apks
-          path: dist-apk/*
+          name: BitChord-dev-debug-apk
+          path: dist-apk/BitChord-dev-debug.apk
 
       - name: Publish GitHub Release
-        continue-on-error: true
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: test-build
-          target_commitish: ${{ github.sha }}
-          name: "Test Build: Local Library & Download Customizations"
-          body: |
-            ### Automated Test Build
-            Built from branch `feature-local-indexing` (${{ github.sha }}).
-
-            #### Which APK should I install on my phone?
-            - **`BitChord-dev-debug.apk` (Recommended):**
-              Universal build using package `com.dev.bitchord` ("BitChord Dev").
-              Can be installed **side-by-side** with your official BitChord app without signature conflicts or uninstalling your current app!
-            - **`BitChord-dev-arm64-v8a-debug.apk`:**
-              Smaller download optimized for modern 64-bit ARM devices (most Android phones).
-            - **`BitChord-prod-debug.apk`:**
-              Uses production package `com.music.bitchord`. Note: if you have official BitChord installed from GitHub releases or F-Droid, you will need to uninstall it first due to debug vs release signature mismatch.
-          files: dist-apk/*
-          prerelease: true
-          overwrite_files: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Clean up any stale release/tag assets from older runs
+          gh release delete test-build --yes || true
+          git push origin :refs/tags/test-build || true
+
+          # Create a fresh test-build release pointing to current commit with raw APK files (no zip!)
+          gh release create test-build dist-apk/* \
+            --target ${{ github.sha }} \
+            --title "BitChord Dev Test Build" \
+            --notes "### Direct Download Links (No Zip Required)
+          - **[BitChord-dev-debug.apk](https://github.com/iamtatenda/BitChord/releases/download/test-build/BitChord-dev-debug.apk)** (Universal dev build, package \`com.dev.bitchord\` - installs side-by-side with official app)
+          - **[BitChord-dev-arm64-v8a-debug.apk](https://github.com/iamtatenda/BitChord/releases/download/test-build/BitChord-dev-arm64-v8a-debug.apk)** (Slim 64-bit ARM build)
+
+          Built from branch \`feature-local-indexing\` (${{ github.sha }})." \
+            --prerelease
+
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-2022
+    needs: [build-apk]
+    continue-on-error: true
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: WiX Toolset 3
+        shell: pwsh
+        run: |
+          $url = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
+          Invoke-WebRequest -Uri $url -OutFile wix.zip
+          Expand-Archive wix.zip -DestinationPath "$env:RUNNER_TEMP\wix"
+          "$env:RUNNER_TEMP\wix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup local.properties
+        shell: bash
+        run: |
+          echo "LASTFM_API_KEY=${{ secrets.LASTFM_API_KEY }}" > local.properties
+          echo "LASTFM_SECRET=${{ secrets.LASTFM_SECRET }}" >> local.properties
+
+      - name: Build Windows Setup EXE
+        run: |
+          .\gradlew.bat :desktopApp:packageExe -Pbitchord.version=test
+
+      - name: Prepare Windows Executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist-win | Out-Null
+          $exe = Get-ChildItem desktopApp/build/compose/binaries/main/exe/*.exe | Select-Object -First 1
+          if ($exe) {
+            Copy-Item $exe.FullName dist-win/BitChord-windows-setup.exe
+          }
+          Get-ChildItem dist-win | Format-Table Name, Length
+
+      - name: Upload Windows Setup to Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if (Test-Path dist-win/BitChord-windows-setup.exe) {
+            gh release upload test-build dist-win/BitChord-windows-setup.exe --clobber
+          }

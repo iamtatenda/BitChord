@@ -11,6 +11,7 @@ import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import okio.Buffer
+import okio.FileSystem
 import java.io.File
 
 /**
@@ -61,7 +62,7 @@ class LocalAudioCoverFetcher(
 
         val buffer = Buffer().write(pic)
         return SourceFetchResult(
-            source = ImageSource(buffer, context),
+            source = ImageSource(buffer, FileSystem.SYSTEM),
             mimeType = mimeType,
             dataSource = DataSource.DISK,
         )

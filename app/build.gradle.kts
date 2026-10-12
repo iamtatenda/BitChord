@@ -398,12 +398,6 @@ dependencies {
     implementation("com.google.android.gms:play-services-cast-framework:22.2.0")
     implementation("androidx.mediarouter:mediarouter:1.8.1")
 
-    // Local Indexing feature dependencies
-    implementation("net.jthink:jaudiotagger:3.0.1")
-    implementation("androidx.paging:paging-runtime:3.2.1")
-    implementation("androidx.sqlite:sqlite:2.4.0")
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
-
     testImplementation("junit:junit:4.13.2")
     // A real HTTP server for the addon tests. The addon protocol is entirely
     // "what does this app send, and what does it do with what comes back", and

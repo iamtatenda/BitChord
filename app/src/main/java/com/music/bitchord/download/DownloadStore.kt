@@ -403,6 +403,22 @@ object DownloadStore {
                 null,
                 null,
             )
+            val filePath = runCatching {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(MediaStore.MediaColumns.DATA),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA))
+                    } else null
+                }
+            }.getOrNull()
+            if (!filePath.isNullOrBlank()) {
+                MediaScannerConnection.scanFile(context, arrayOf(filePath), null, null)
+            }
             return uri
         }
 

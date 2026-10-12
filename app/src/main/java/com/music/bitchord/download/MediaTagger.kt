@@ -438,7 +438,12 @@ object MediaTagger {
 
     private fun fetchCover(url: String, logId: String): Artwork? {
         return runCatching {
-            val request = okhttp3.Request.Builder().url(url).build()
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+                .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                .header("Referer", "https://music.youtube.com/")
+                .build()
             Http.client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@runCatching null
                 val raw = response.body?.bytes() ?: return@runCatching null

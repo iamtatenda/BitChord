@@ -1210,7 +1210,7 @@ object Downloads {
         // MediaStore.Audio refuses audio/webm on affected Android versions.
         // Keep Opus for app-private downloads, but pin exported downloads to
         // AAC-in-MP4 for both the initial resolve and any mid-transfer retry.
-        val requireM4a = AppSettings.exportDownloads.value
+        val requireM4a = AppSettings.exportDownloads.value || !AppSettings.downloadFolderUri.value.isNullOrBlank()
         val stream = StreamResolver.resolveForDownload(track.videoId, quality.maxKbps, requireM4a)
         return Route(
             extension = stream.downloadExtension,

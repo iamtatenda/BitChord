@@ -207,7 +207,7 @@ object AppSettings {
      * HLS downloads always stay private because they are a playlist package,
      * not one portable audio file.
      */
-    val exportDownloads = MutableStateFlow(false)
+    val exportDownloads = MutableStateFlow(true)
     val downloadFolderUri = MutableStateFlow<String?>(null)
     val downloadArtistSeparator = MutableStateFlow(", ")
     val downloadOrganizeFolders = MutableStateFlow(false)
@@ -789,7 +789,7 @@ object AppSettings {
         migrateDownloadQuality()
         downloadQuality.value = readDownloadQuality()
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
-        exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, false)
+        exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, true)
         downloadFolderUri.value = prefs.getString(KEY_DOWNLOAD_FOLDER_URI, null)?.takeIf { it.isNotBlank() }
         downloadArtistSeparator.value = prefs.getString(KEY_DOWNLOAD_ARTIST_SEPARATOR, ", ").orEmpty().ifEmpty { ", " }
         downloadOrganizeFolders.value = prefs.getBoolean(KEY_DOWNLOAD_ORGANIZE_FOLDERS, false)

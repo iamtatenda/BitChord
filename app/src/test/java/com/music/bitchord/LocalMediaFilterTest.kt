@@ -123,5 +123,31 @@ class LocalMediaFilterTest {
             LocalMediaRepository.resolvePhysicalPath("raw:/storage/emulated/0/Music/Song.m4a"),
         )
     }
+
+    @Test
+    fun isInSelectedFolderMatchesRelativePathWhenPhysicalPathNull() {
+        val treeUri = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
+        assertTrue(LocalMediaRepository.isInSelectedFolder(null, "Music/Album/", treeUri))
+        assertTrue(LocalMediaRepository.isInSelectedFolder(null, "Music", treeUri))
+        assertFalse(LocalMediaRepository.isInSelectedFolder(null, "Download/Album/", treeUri))
+    }
+
+    @Test
+    fun parseMetadataFromPathExtractsArtistAndTitle() {
+        with(LocalMediaRepository) {
+            val res1 = parseMetadataFromPath("Queen - Bohemian Rhapsody.mp3", null)
+            org.junit.Assert.assertEquals("Bohemian Rhapsody", res1.title)
+            org.junit.Assert.assertEquals("Queen", res1.artist)
+
+            val res2 = parseMetadataFromPath("01 - Bohemian Rhapsody.flac", null)
+            org.junit.Assert.assertEquals("Bohemian Rhapsody", res2.title)
+
+            val res3 = parseMetadataFromPath("01. Song.mp3", null)
+            org.junit.Assert.assertEquals("Song", res3.title)
+
+            val res4 = parseMetadataFromPath("1984.mp3", null)
+            org.junit.Assert.assertEquals("1984", res4.title)
+        }
+    }
 }
 

@@ -201,7 +201,7 @@ object LocalMediaRepository {
         // for — a content URI fails its id check on purpose, since most rows
         // here really are just local files with nothing to sync.
         val videoIdByUri = Downloads.saved.value.entries.associate { (id, uri) -> uri to id }
-        val projection = arrayOf(
+        val projection = mutableListOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.DISPLAY_NAME,
             MediaStore.Audio.Media.TITLE,
@@ -213,6 +213,9 @@ object LocalMediaRepository {
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.DATE_MODIFIED,
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.Audio.Media.RELATIVE_PATH)
+        }
 
         val filterNonMusic = AppSettings.filterNonMusicAudio.value
         val selection = if (filterNonMusic) {
@@ -238,101 +241,103 @@ object LocalMediaRepository {
             runCatching {
                 val volumes = MediaStore.getExternalVolumeNames(context)
                 for (vol in volumes) {
-                    contentUris.add(MediaStore.Audio.Media.getContentUri(vol))
+                    val u = MediaStore.Audio.Media.getContentUri(vol)
+                    if (u !in contentUris) contentUris.add(u)
                 }
             }
         }
-        if (contentUris.isEmpty()) {
+        if (MediaStore.Audio.Media.EXTERNAL_CONTENT_URI !in contentUris) {
             contentUris.add(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
         }
 
         val seenUris = mutableSetOf<String>()
         val seenPaths = mutableSetOf<String>()
+        val folderFilter = AppSettings.localMusicFolderUri.value
+
         for (volumeUri in contentUris) {
             runCatching {
                 context.contentResolver.query(
                     volumeUri,
-                    projection,
+                    projection.toTypedArray(),
                     selection,
                     selectionArgs,
                     sortOrder,
                 )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                val displayNameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
-                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-                val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val displayNameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                    val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                    val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+                    val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        cursor.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
+                    } else -1
 
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
-                    val displayName = cursor.getString(displayNameCol).orEmpty()
-                    val rawTitle = cursor.getString(titleCol)
-                    val rawArtist = cursor.getString(artistCol)
-                    val rawAlbum = cursor.getString(albumCol)
-                    val durationMs = cursor.getLong(durationCol)
-                    val path = cursor.getString(dataCol)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val displayName = cursor.getString(displayNameCol).orEmpty()
+                        val rawTitle = cursor.getString(titleCol)
+                        val rawArtist = cursor.getString(artistCol)
+                        val rawAlbum = cursor.getString(albumCol)
+                        val durationMs = cursor.getLong(durationCol)
+                        val path = if (dataCol >= 0) cursor.getString(dataCol) else null
+                        val relativePath = if (relPathCol >= 0) cursor.getString(relPathCol) else null
 
-                    if (path != null && !File(path).exists()) {
-                        val existsInMediaStore = runCatching {
-                            context.contentResolver.openAssetFileDescriptor(ContentUris.withAppendedId(volumeUri, id), "r")?.use { true } ?: false
-                        }.getOrDefault(false)
-                        if (!existsInMediaStore) continue
-                    }
+                        val norm = path?.normalizedPath()
+                        if (norm != null && seenPaths.contains(norm)) continue
 
-                    val norm = path?.normalizedPath()
-                    if (norm != null && !seenPaths.add(norm)) continue
+                        if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
+                        if (!isInSelectedFolder(path, relativePath, folderFilter)) continue
 
-                    if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
-                    if (!isInSelectedFolder(path, AppSettings.localMusicFolderUri.value)) continue
+                        val contentUri = ContentUris.withAppendedId(volumeUri, id).toString()
+                        if (!seenUris.add(contentUri)) continue
+                        if (norm != null) seenPaths.add(norm)
 
-                    val contentUri = ContentUris.withAppendedId(volumeUri, id).toString()
-                    if (!seenUris.add(contentUri)) continue
-                    val title = rawTitle.cleanTag()?.removeAudioExtension()
-                        ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
-                        ?: "Track $id"
-                    val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
-                    val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
-                    
-                    val folderArt = path?.let { p ->
-                        val parent = File(p).parentFile
-                        if (parent != null && parent.exists()) {
-                            File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                ?: File(parent, "Folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                ?: File(parent, "cover.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                        } else null
-                    }
-                    val artworkUrl = folderArt ?: "audio:$contentUri"
-                    val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
+                        val title = rawTitle.cleanTag()?.removeAudioExtension()
+                            ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
+                            ?: "Track $id"
+                        val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
+                        val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
 
-                    songs.add(
-                        Song(
-                            videoId = videoIdByUri[contentUri] ?: contentUri,
-                            title = title,
-                            artist = artist,
-                            thumbnailUrl = artworkUrl,
-                            durationText = durationText,
-                            albumName = albumName,
-                            localUri = contentUri,
-                            localPath = path,
-                            localDateAddedSeconds = cursor.getLong(dateAddedCol),
-                            localDateModifiedSeconds = cursor.getLong(dateModifiedCol),
+                        val folderArt = path?.let { p ->
+                            val parent = File(p).parentFile
+                            if (parent != null && parent.exists()) {
+                                File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                    ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                    ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                    ?: File(parent, "Folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                    ?: File(parent, "cover.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                                    ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
+                            } else null
+                        }
+                        val artworkUrl = folderArt ?: "audio:$contentUri"
+                        val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
+
+                        songs.add(
+                            Song(
+                                videoId = videoIdByUri[contentUri] ?: contentUri,
+                                title = title,
+                                artist = artist,
+                                thumbnailUrl = artworkUrl,
+                                durationText = durationText,
+                                albumName = albumName,
+                                localUri = contentUri,
+                                localPath = path,
+                                localDateAddedSeconds = cursor.getLong(dateAddedCol),
+                                localDateModifiedSeconds = cursor.getLong(dateModifiedCol),
+                            )
                         )
-                    )
+                    }
                 }
-            }
-        }.onFailure { Log.w(TAG, "Failed scanning volume $volumeUri: ${it.message}") }
+            }.onFailure { Log.w(TAG, "Failed scanning volume $volumeUri: ${it.message}") }
         }
 
-        // Also query MediaStore.Files to catch audio files that Android's media scanner
-        // did not put into MediaStore.Audio.Media (e.g. newly synced folders, SD card files)
+        // Also query MediaStore.Files across all volumes to catch audio files that
+        // Android's media scanner did not index under MediaStore.Audio.Media.
         val filesUris = mutableListOf<Uri>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
@@ -343,11 +348,11 @@ object LocalMediaRepository {
                 }
             }
         }
-        if (filesUris.isEmpty()) {
+        if (MediaStore.Files.getContentUri("external") !in filesUris) {
             filesUris.add(MediaStore.Files.getContentUri("external"))
         }
 
-        val filesProjection = arrayOf(
+        val filesProjection = mutableListOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
             MediaStore.Files.FileColumns.DATA,
@@ -356,6 +361,9 @@ object LocalMediaRepository {
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.MIME_TYPE,
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            filesProjection.add(MediaStore.Files.FileColumns.RELATIVE_PATH)
+        }
 
         val filesSelection = buildString {
             append("(")
@@ -373,57 +381,62 @@ object LocalMediaRepository {
             runCatching {
                 context.contentResolver.query(
                     filesVolumeUri,
-                    filesProjection,
+                    filesProjection.toTypedArray(),
                     filesSelection,
                     null,
                     sortOrder,
                 )?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
                     val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                    val dataCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                     val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
                     val modCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                    val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        cursor.getColumnIndex(MediaStore.Files.FileColumns.RELATIVE_PATH)
+                    } else -1
 
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         val name = cursor.getString(nameCol).orEmpty()
-                        val path = cursor.getString(dataCol)
+                        val path = if (dataCol >= 0) cursor.getString(dataCol) else null
+                        val relativePath = if (relPathCol >= 0) cursor.getString(relPathCol) else null
                         val contentUri = ContentUris.withAppendedId(filesVolumeUri, id).toString()
 
                         val norm = path?.normalizedPath()
-                        if (norm != null && !seenPaths.add(norm)) continue
-                        if (!seenUris.add(contentUri)) continue
+                        if (norm != null && seenPaths.contains(norm)) continue
+                        if (seenUris.contains(contentUri)) continue
 
                         if (filterNonMusic && !isEligibleLocalMusic(0, name, path)) continue
-                        if (!isInSelectedFolder(path, AppSettings.localMusicFolderUri.value)) continue
+                        if (!isInSelectedFolder(path, relativePath, folderFilter)) continue
 
                         if (path != null) {
                             val f = File(path)
                             if (f.exists() && f.isFile) {
-                                val song = buildSongFromFile(context, f)
+                                val song = buildSongFromFile(f)
                                 if (song != null) {
+                                    seenUris.add(contentUri)
+                                    if (norm != null) seenPaths.add(norm)
                                     songs.add(song.copy(localUri = contentUri))
                                     continue
                                 }
                             }
                         }
 
-                        val title = name.substringBeforeLast('.').ifBlank { "Track $id" }
-                        val added = cursor.getLong(addedCol)
-                        val modified = cursor.getLong(modCol)
-
+                        val parsed = parseMetadataFromPath(name, null)
+                        seenUris.add(contentUri)
+                        if (norm != null) seenPaths.add(norm)
                         songs.add(
                             Song(
                                 videoId = contentUri,
-                                title = title,
-                                artist = "Unknown Artist",
+                                title = parsed.title,
+                                artist = parsed.artist,
                                 thumbnailUrl = "audio:$contentUri",
                                 durationText = null,
-                                albumName = null,
+                                albumName = parsed.album,
                                 localUri = contentUri,
                                 localPath = path,
-                                localDateAddedSeconds = added,
-                                localDateModifiedSeconds = modified,
+                                localDateAddedSeconds = cursor.getLong(addedCol),
+                                localDateModifiedSeconds = cursor.getLong(modCol),
                             ),
                         )
                     }
@@ -431,36 +444,32 @@ object LocalMediaRepository {
             }.onFailure { Log.w(TAG, "Failed scanning MediaStore.Files on $filesVolumeUri: ${it.message}") }
         }
 
-        // Direct file discovery on selected folder and standard music paths
+        // Direct file discovery on selected folder and standard storage paths
         // to find songs not indexed by Android's system MediaScanner (Namida parity).
-        val selectedUri = AppSettings.localMusicFolderUri.value
-        val selectedPath = selectedFolderPath(selectedUri)
+        val selectedPath = selectedFolderPath(folderFilter)
         val targetFolders = mutableListOf<File>()
 
         if (!selectedPath.isNullOrBlank()) {
             val f = File(selectedPath)
             if (f.exists() && f.isDirectory) targetFolders.add(f)
         } else {
-            val primaryRoots = listOf("Music", "Download", "Audio", "Sounds", "BitChord")
-            for (sub in primaryRoots) {
-                val f = File("/storage/emulated/0/$sub")
-                if (f.exists() && f.isDirectory && f !in targetFolders) targetFolders.add(f)
+            val internalStorage = File("/storage/emulated/0")
+            if (internalStorage.exists() && internalStorage.isDirectory) {
+                internalStorage.listFiles()?.forEach { dir ->
+                    if (dir.isDirectory && !dir.name.startsWith(".") && dir.name != "Android") {
+                        targetFolders.add(dir)
+                    }
+                }
             }
 
             // Direct SD Card scanning: detect physical SD card mount points in /storage
             val storageRoot = File("/storage")
             if (storageRoot.exists() && storageRoot.isDirectory) {
                 storageRoot.listFiles()?.forEach { vol ->
-                    if (vol.isDirectory && vol.name != "emulated" && vol.name != "self") {
-                        val knownSub = listOf("Music", "Download", "Audio", "Sounds", "FLAC", "Albums", "Songs")
-                        for (sub in knownSub) {
-                            val f = File(vol, sub)
-                            if (f.exists() && f.isDirectory && f !in targetFolders) targetFolders.add(f)
-                        }
-                        // Inspect all top-level non-hidden user directories on the SD card
-                        vol.listFiles()?.forEach { subDir ->
-                            if (subDir.isDirectory && subDir.name != "Android" && !subDir.name.startsWith(".") && subDir !in targetFolders) {
-                                targetFolders.add(subDir)
+                    if (vol.isDirectory && vol.name != "emulated" && vol.name != "self" && !vol.name.startsWith(".")) {
+                        vol.listFiles()?.forEach { dir ->
+                            if (dir.isDirectory && !dir.name.startsWith(".") && dir.name != "Android" && dir !in targetFolders) {
+                                targetFolders.add(dir)
                             }
                         }
                     }
@@ -468,20 +477,15 @@ object LocalMediaRepository {
             }
             // Also query Android's external storage directories to discover all physical SD card mount roots
             runCatching {
-                androidx.core.content.ContextCompat.getExternalFilesDirs(context, null).forEach { extDir ->
+                ContextCompat.getExternalFilesDirs(context, null).forEach { extDir ->
                     if (extDir != null) {
                         val rootPath = extDir.absolutePath.substringBefore("/Android/data")
-                        if (rootPath != "/storage/emulated/0" && rootPath.isNotBlank()) {
+                        if (rootPath.isNotBlank()) {
                             val vol = File(rootPath)
                             if (vol.exists() && vol.isDirectory) {
-                                val knownSub = listOf("Music", "Download", "Audio", "Sounds", "FLAC", "Albums", "Songs")
-                                for (sub in knownSub) {
-                                    val f = File(vol, sub)
-                                    if (f.exists() && f.isDirectory && f !in targetFolders) targetFolders.add(f)
-                                }
-                                vol.listFiles()?.forEach { subDir ->
-                                    if (subDir.isDirectory && subDir.name != "Android" && !subDir.name.startsWith(".") && subDir !in targetFolders) {
-                                        targetFolders.add(subDir)
+                                vol.listFiles()?.forEach { dir ->
+                                    if (dir.isDirectory && !dir.name.startsWith(".") && dir.name != "Android" && dir !in targetFolders) {
+                                        targetFolders.add(dir)
                                     }
                                 }
                             }
@@ -496,12 +500,13 @@ object LocalMediaRepository {
                 folder.walkTopDown().maxDepth(15).forEach { file ->
                     if (file.isFile && isAudioFileName(file.name)) {
                         val norm = file.absolutePath.normalizedPath()
-                        if (seenPaths.add(norm)) {
+                        if (!seenPaths.contains(norm)) {
                             if (filterNonMusic && !isEligibleLocalMusic(0, file.name, file.absolutePath)) return@forEach
-                            val song = buildSongFromFile(context, file)
+                            val song = buildSongFromFile(file)
                             if (song != null) {
                                 val u = song.localUri ?: return@forEach
                                 if (seenUris.add(u)) {
+                                    seenPaths.add(norm)
                                     songs.add(song)
                                 }
                             }
@@ -512,9 +517,9 @@ object LocalMediaRepository {
         }
 
         // Also if SAF tree URI is configured, walk using fast DocumentsContract queries
-        if (selectedUri.isNotBlank()) {
+        if (folderFilter.isNotBlank()) {
             runCatching {
-                val parsedUri = Uri.parse(selectedUri)
+                val parsedUri = Uri.parse(folderFilter)
                 val rootDocId = runCatching { DocumentsContract.getTreeDocumentId(parsedUri) }.getOrNull()
                     ?: parsedUri.lastPathSegment.orEmpty()
 
@@ -562,20 +567,22 @@ object LocalMediaRepository {
                         val (docId, name, mod) = item
                         val resolvedPath = resolvePhysicalPath(docId)
                         val normPath = resolvedPath?.normalizedPath()
-                        if (normPath != null && !seenPaths.add(normPath)) continue
+                        if (normPath != null && seenPaths.contains(normPath)) continue
 
                         val docUri = DocumentsContract.buildDocumentUriUsingTree(parsedUri, docId)
                         val uriStr = docUri.toString()
-                        if (seenUris.add(uriStr)) {
-                            val song = buildSongFromSaf(context, docUri, name, mod, folderCoverUri, resolvedPath)
+                        if (!seenUris.contains(uriStr)) {
+                            val song = buildSongFromSaf(docUri, name, mod, folderCoverUri, resolvedPath)
                             if (song != null) {
+                                seenUris.add(uriStr)
+                                if (normPath != null) seenPaths.add(normPath)
                                 songs.add(song)
                             }
                         }
                     }
 
                     for (subId in subDirs) {
-                        scanSafFast(subId, depth - 1, null)
+                        scanSafFast(subId, depth - 1, folderCoverUri)
                     }
                 }
 
@@ -596,18 +603,41 @@ object LocalMediaRepository {
     fun selectedFolderPath(treeUri: String?): String? =
         if (treeUri.isNullOrBlank()) null else selectedFolder(treeUri)?.absolutePath
 
-    internal fun isInSelectedFolder(path: String?, treeUri: String?): Boolean {
+    internal fun isInSelectedFolder(path: String?, treeUri: String?): Boolean =
+        isInSelectedFolder(path, null, treeUri)
+
+    internal fun isInSelectedFolder(path: String?, relativePath: String?, treeUri: String?): Boolean {
         if (treeUri.isNullOrBlank()) return true
-        if (path.isNullOrBlank()) return false
         val folder = selectedFolder(treeUri) ?: return false
-        val candidate = path.normalizedPath()
         val target = folder.normalizedPath
-        return candidate == target || candidate.startsWith("$target/")
+
+        // 1. Direct absolute/physical path match
+        if (!path.isNullOrBlank()) {
+            val candidate = path.normalizedPath()
+            if (candidate == target || candidate.startsWith("$target/")) return true
+        }
+
+        // 2. Relative path match (e.g. MediaStore.Audio.Media.RELATIVE_PATH = "Music/...")
+        if (!relativePath.isNullOrBlank()) {
+            val normRel = relativePath.trim('/').lowercase(Locale.ROOT)
+            val folderRel = folder.relativePath?.trim('/')?.lowercase(Locale.ROOT)
+            if (folderRel != null && (normRel == folderRel || normRel.startsWith("$folderRel/"))) {
+                return true
+            }
+            val targetLabel = folder.label.trim().lowercase(Locale.ROOT)
+            if (targetLabel.isNotBlank()) {
+                val segments = normRel.split('/')
+                if (segments.any { it == targetLabel }) return true
+            }
+        }
+
+        return false
     }
 
     private data class SelectedFolder(
         val absolutePath: String,
         val label: String,
+        val relativePath: String? = null,
         val normalizedPath: String = absolutePath.normalizedPath(),
     )
 
@@ -635,18 +665,26 @@ object LocalMediaRepository {
             ?: parsedUri.lastPathSegment.orEmpty()
         val exactPath = resolvePhysicalPath(rawDocId) ?: return@runCatching null
         val decodedId = runCatching { java.net.URLDecoder.decode(rawDocId, "UTF-8") }.getOrDefault(rawDocId)
+        val relative = if (decodedId.startsWith("raw:")) {
+            null
+        } else if (':' in decodedId) {
+            decodedId.substringAfter(':', "").trim('/')
+        } else {
+            null
+        }
         val label = if (decodedId.startsWith("raw:")) {
             exactPath.substringAfterLast('/')
         } else if (':' in decodedId) {
-            val relative = decodedId.substringAfter(':', "").trim('/')
+            val rel = decodedId.substringAfter(':', "").trim('/')
             val volume = decodedId.substringBefore(':')
-            relative.ifBlank { volume }
+            rel.ifBlank { volume }
         } else {
             exactPath.substringAfterLast('/')
         }
         SelectedFolder(
             absolutePath = exactPath,
             label = label,
+            relativePath = relative,
         )
     }.getOrNull()
 
@@ -717,17 +755,20 @@ object LocalMediaRepository {
 
         runCatching {
             val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(context, Uri.parse(uriStr))
-            val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            try {
+                retriever.setDataSource(context, Uri.parse(uriStr))
+                val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
 
-            if (!metaTitle.isNullOrBlank()) title = metaTitle
-            if (!metaArtist.isNullOrBlank()) artist = metaArtist
-            albumName = metaAlbum.cleanTag()
-            if (metaDur != null && metaDur > 0) durationText = formatDuration(metaDur)
-            retriever.release()
+                if (!metaTitle.isNullOrBlank()) title = metaTitle
+                if (!metaArtist.isNullOrBlank()) artist = metaArtist
+                albumName = metaAlbum.cleanTag()
+                if (metaDur != null && metaDur > 0) durationText = formatDuration(metaDur)
+            } finally {
+                runCatching { retriever.release() }
+            }
         }
 
         return Song(
@@ -750,18 +791,71 @@ object LocalMediaRepository {
         return String.format(Locale.ROOT, "%d:%02d", minutes, secs)
     }
 
-    private fun buildSongFromFile(context: Context, file: File): Song? {
+    internal data class ParsedFileMetadata(
+        val title: String,
+        val artist: String,
+        val album: String?,
+    )
+
+    internal fun String.cleanTrackNumber(): String {
+        val trimmed = this.trim()
+        val regex = Regex("""^(\d{1,3}[\.\-\s_]+|[A-Za-z]\d{1,2}[\.\-\s_]+|\d{1,2}-\d{1,2}[\.\-\s_]+)""")
+        val result = trimmed.replace(regex, "").trim()
+        return if (result.isNotBlank()) result else trimmed
+    }
+
+    internal fun parseMetadataFromPath(name: String, parentDir: File?): ParsedFileMetadata {
+        val baseName = name.substringBeforeLast('.')
+        var title = baseName
+        var artist = "Unknown Artist"
+        var album: String? = null
+
+        if (" - " in baseName) {
+            val parts = baseName.split(" - ")
+            val first = parts[0].trim()
+            val rest = parts.drop(1).joinToString(" - ").trim()
+            if (first.matches(Regex("""^\d+$""")) || first.matches(Regex("""^[A-Za-z]?\d+$"""))) {
+                title = rest.ifBlank { baseName }
+            } else {
+                artist = first
+                title = rest.cleanTrackNumber().ifBlank { rest }
+            }
+        } else {
+            title = baseName.cleanTrackNumber().ifBlank { baseName }
+        }
+
+        if (parentDir != null && parentDir.name.isNotBlank()) {
+            val pName = parentDir.name
+            if (pName != "Music" && pName != "Download" && pName != "0" && pName != "emulated") {
+                album = pName
+                val gp = parentDir.parentFile
+                if (gp != null && gp.name.isNotBlank()) {
+                    val gpName = gp.name
+                    if (gpName != "Music" && gpName != "Download" && gpName != "0" && gpName != "emulated") {
+                        if (artist == "Unknown Artist") {
+                            artist = gpName
+                        }
+                    }
+                }
+            }
+        }
+
+        return ParsedFileMetadata(
+            title = title.cleanTrackNumber().ifBlank { baseName },
+            artist = artist,
+            album = album,
+        )
+    }
+
+    private fun buildSongFromFile(file: File): Song? {
         val path = file.absolutePath
         val name = file.name
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
 
-        var title = name.substringBeforeLast('.')
-        var artist = "Unknown Artist"
-        var album: String? = null
-        var durationText: String? = null
-
         val parent = file.parentFile
+        val parsed = parseMetadataFromPath(name, parent)
+
         val folderArt = if (parent != null && parent.exists()) {
             File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
                 ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
@@ -771,34 +865,16 @@ object LocalMediaRepository {
                 ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
         } else null
 
-        var extractedArt: String? = null
-        runCatching {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(path)
-            val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-
-            if (!metaTitle.isNullOrBlank()) title = metaTitle
-            if (!metaArtist.isNullOrBlank()) artist = metaArtist
-            album = metaAlbum.cleanTag()
-            if (metaDur != null && metaDur > 0) {
-                durationText = formatDuration(metaDur)
-            }
-            retriever.release()
-        }
-
         val modified = file.lastModified().takeIf { it > 0 }?.div(1000)
         val fileUri = Uri.fromFile(file).toString()
 
         return Song(
             videoId = fileUri,
-            title = title,
-            artist = artist,
+            title = parsed.title,
+            artist = parsed.artist,
             thumbnailUrl = folderArt ?: "audio:$fileUri",
-            durationText = durationText,
-            albumName = album,
+            durationText = null,
+            albumName = parsed.album,
             localUri = fileUri,
             localPath = path,
             localDateAddedSeconds = modified,
@@ -807,7 +883,6 @@ object LocalMediaRepository {
     }
 
     private fun buildSongFromSaf(
-        context: Context,
         uri: Uri,
         name: String,
         lastModifiedMs: Long,
@@ -817,38 +892,17 @@ object LocalMediaRepository {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
 
-        var title = name.substringBeforeLast('.')
-        var artist = "Unknown Artist"
-        var album: String? = null
-        var durationText: String? = null
-
-        runCatching {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(context, uri)
-            val metaTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-
-            if (!metaTitle.isNullOrBlank()) title = metaTitle
-            if (!metaArtist.isNullOrBlank()) artist = metaArtist
-            album = metaAlbum.cleanTag()
-            if (metaDur != null && metaDur > 0) {
-                durationText = formatDuration(metaDur)
-            }
-            retriever.release()
-        }
-
+        val parsed = parseMetadataFromPath(name, physicalPath?.let { File(it).parentFile })
         val modified = lastModifiedMs.takeIf { it > 0 }?.div(1000)
         val uriStr = uri.toString()
 
         return Song(
             videoId = uriStr,
-            title = title,
-            artist = artist,
+            title = parsed.title,
+            artist = parsed.artist,
             thumbnailUrl = folderArtUri ?: "audio:$uriStr",
-            durationText = durationText,
-            albumName = album,
+            durationText = null,
+            albumName = parsed.album,
             localUri = uriStr,
             localPath = physicalPath,
             localDateAddedSeconds = modified,
@@ -866,6 +920,6 @@ object LocalMediaRepository {
             val docId = DocumentsContract.getDocumentId(doc.uri)
             resolvePhysicalPath(docId)
         }.getOrNull()
-        return buildSongFromSaf(context, doc.uri, name, doc.lastModified(), folderArtUri, resolvedPath)
+        return buildSongFromSaf(doc.uri, name, doc.lastModified(), folderArtUri, resolvedPath)
     }
 }

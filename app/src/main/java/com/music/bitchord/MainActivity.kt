@@ -2856,6 +2856,12 @@ private fun BitChordApp(
                             isIndexing = isLocalIndexing,
                             indexedCount = localIndexedCount,
                             onRefresh = { viewModel.refreshLocalMusic() },
+                            onOpenOnlineArtist = { name ->
+                                openByName(null, name, null, BrowseType.ARTIST)
+                            },
+                            onOpenOnlineAlbum = { title, artist ->
+                                openByName(null, title, artist, BrowseType.ALBUM)
+                            },
                             onDeleteDownloads = { selected ->
                                 scope.launch {
                                     selected.forEach { song -> Downloads.delete(context, song.videoId) }

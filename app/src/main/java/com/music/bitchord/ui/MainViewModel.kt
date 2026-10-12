@@ -1977,14 +1977,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val cached = LocalMediaRepository.getCachedLocalMusic(context)
                 if (cached.isNotEmpty()) {
                     _librarySongs.value = UiState.Success(cached)
-                    launch {
-                        runCatching {
-                            val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
-                            if (fresh != cached && fresh.isNotEmpty()) {
-                                _librarySongs.value = UiState.Success(fresh)
-                            }
-                        }
-                    }
                 } else {
                     runCatching { LocalMediaRepository.scanAndCacheLocalMusic(context) }.fold(
                         onSuccess = { songs ->
@@ -2566,18 +2558,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     } else {
                         val cached = LocalMediaRepository.getCachedLocalMusic(context)
                         if (cached.isNotEmpty()) {
-                            viewModelScope.launch {
-                                runCatching {
-                                    val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
-                                    if (fresh != cached) {
-                                        _detailStack.value = _detailStack.value.map {
-                                            if (it.browseId == "local:all") {
-                                                it.copy(songs = UiState.Success(fresh))
-                                            } else it
-                                        }
-                                    }
-                                }
-                            }
                             UiState.Success(cached)
                         } else {
                             val songs = LocalMediaRepository.scanAndCacheLocalMusic(context)

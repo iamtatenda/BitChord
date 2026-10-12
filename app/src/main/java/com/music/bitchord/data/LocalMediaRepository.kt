@@ -802,6 +802,34 @@ object LocalMediaRepository {
         return scoreCandidate > scoreCurrent
     }
 
+    private val ARTIST_DELIMITER_REGEX = Regex(
+        """\s*;\s*|\s*,\s*|\s+/\s+|\s+&\s+|\s+＆\s+|\s+(?:feat|ft|featuring)\.?\s+""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * Splits artist credits into individual artists, preserving compound names
+     * without spaces (such as AC/DC).
+     */
+    fun splitArtists(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return raw.split(ARTIST_DELIMITER_REGEX)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.equals("Unknown Artist", ignoreCase = true) }
+    }
+
+    /**
+     * Returns all indexed local tracks featuring [artistName], either as primary
+     * or guest artist.
+     */
+    fun getLocalSongsForArtist(artistName: String, context: Context? = null): List<Song> {
+        val allSongs = cachedSongsMemory ?: context?.let { getCachedLocalMusic(it) } ?: return emptyList()
+        val target = artistName.trim().lowercase(Locale.ROOT)
+        return allSongs.filter { song ->
+            splitArtists(song.artist).any { it.trim().lowercase(Locale.ROOT) == target }
+        }
+    }
+
     /** Human-readable path for the folder setting without exposing provider internals. */
     fun selectedFolderLabel(treeUri: String?): String? =
         if (treeUri.isNullOrBlank()) null else selectedFolder(treeUri)?.label

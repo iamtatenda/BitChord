@@ -358,6 +358,10 @@
     <string name="indexing_library_progress">Indexing library (%1$d tracks found)…</string>
     <string name="indexing_library_searching">Indexing library…</string>
     <string name="refresh_library">Refresh library</string>
+    <string name="view_online_artist">Online Profile</string>
+    <string name="view_online_album">Online Album</string>
+    <string name="more_tracks_in_queue">+ %1$d more songs in queue</string>
+    <string name="in_local_library">In Local Library</string>
     <string name="performance">Performance</string>
     <string name="high_performance_mode">High performance mode</string>
     <string name="high_performance_subtitle">Uses full animations and blur, and requests a higher display refresh rate</string>

@@ -48,6 +48,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.ui.platform.LocalContext
+import com.music.bitchord.data.LocalMediaRepository
 import androidx.compose.ui.graphics.luminance
 import com.music.bitchord.data.model.LibraryState
 import androidx.compose.material.icons.rounded.Close
@@ -303,6 +307,11 @@ fun DetailScreen(
         rawSongs.withIndex().associate { (i, s) -> s.videoId to i + 1 }
     }
     val isArtist = page.type == BrowseType.ARTIST
+    val localContext = LocalContext.current
+    val localSongsForArtist = remember(page.title, isArtist) {
+        if (isArtist) LocalMediaRepository.getLocalSongsForArtist(page.title, localContext)
+        else emptyList()
+    }
     // Whether the top release card's album is already saved isn't on the shelf
     // item; it is read off the album once, as soon as the card is known.
     val topReleaseId = if (isArtist) page.sections.topRelease()?.browseId else null
@@ -499,6 +508,55 @@ fun DetailScreen(
                         bottomSpace = 22.dp,
                         playColor = appleArt?.keyColor?.let { Color(it) },
                     )
+                }
+            }
+
+            if (isArtist && localSongsForArtist.isNotEmpty()) {
+                item(key = "local-library-badge") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = ARTIST_CONTENT_GUTTER, vertical = 6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onSongClick(localSongsForArtist, 0)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.LibraryMusic,
+                                contentDescription = null,
+                                tint = palette.accent,
+                                modifier = Modifier.size(24.dp),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.in_local_library),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = pluralStringResource(R.plurals.song_count_plural, localSongsForArtist.size, localSongsForArtist.size),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = palette.accent,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
                 }
             }
 

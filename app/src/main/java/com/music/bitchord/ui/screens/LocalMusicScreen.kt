@@ -98,6 +98,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.canvas.AppleArtistArtRepository
 import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
@@ -187,6 +189,8 @@ fun LocalMusicScreen(
     onDeleteDownloads: ((List<Song>) -> Unit)? = null,
     /** Copies the selected Downloads rows to the WebDAV server; null hides the action. */
     onUploadToWebDav: ((List<Song>) -> Unit)? = null,
+    onOpenOnlineArtist: ((String) -> Unit)? = null,
+    onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Which top-level tab is selected.
@@ -244,6 +248,7 @@ fun LocalMusicScreen(
     // When non-null, we are showing a drill-down list for that artist or album.
     var drillDownLabel by remember { mutableStateOf<String?>(null) }
     var drillDownSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var drillDownIsArtist by remember { mutableStateOf(false) }
     // The release's own cover, for the drill-down header. Only a downloaded
     // album or playlist has one worth showing — a tag-derived grouping's
     // "artwork" is just whichever of its rows happened to be first.
@@ -255,6 +260,7 @@ fun LocalMusicScreen(
         drillDownLabel = null
         drillDownSongs = emptyList()
         drillDownArt = null
+        drillDownIsArtist = false
     }
 
     BackHandler(enabled = selectingDownloads) {
@@ -474,6 +480,9 @@ fun LocalMusicScreen(
                         label = drillDownLabel ?: "",
                         artworkUrl = drillDownArt,
                         songs = drillDownSongs,
+                        isArtist = drillDownIsArtist,
+                        onOpenOnlineArtist = onOpenOnlineArtist,
+                        onOpenOnlineAlbum = onOpenOnlineAlbum,
                         viewType = viewType,
                         selectedIds = selectedDownloadIds,
                         currentSong = currentSong,
@@ -546,7 +555,7 @@ fun LocalMusicScreen(
                     var artists by remember(sortedSongs, searchQuery) {
                         mutableStateOf(
                             if (sortedSongs.size <= 200) {
-                                sortedSongs.groupBy { it.artist }
+                                groupSongsBySplitArtists(sortedSongs)
                                     .entries
                                     .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
                                     .sortedBy { it.key.lowercase(Locale.ROOT) }
@@ -556,7 +565,7 @@ fun LocalMusicScreen(
                     LaunchedEffect(sortedSongs, searchQuery) {
                         if (sortedSongs.size > 200) {
                             val result = withContext(Dispatchers.Default) {
-                                sortedSongs.groupBy { it.artist }
+                                groupSongsBySplitArtists(sortedSongs)
                                     .entries
                                     .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
                                     .sortedBy { it.key.lowercase(Locale.ROOT) }
@@ -571,6 +580,7 @@ fun LocalMusicScreen(
                             drillDownLabel = artist
                             drillDownSongs = artistSongs
                             drillDownArt = null
+                            drillDownIsArtist = true
                         },
                         onArtistLongPress = onCollectionLongPress,
                         contentPadding = bodyContentPadding,
@@ -613,6 +623,7 @@ fun LocalMusicScreen(
                                 drillDownLabel = entry.title
                                 drillDownSongs = entry.songs
                                 drillDownArt = entry.thumbnailUrl
+                                drillDownIsArtist = false
                             }
                         },
                         onAlbumLongPress = { entry ->
@@ -627,6 +638,21 @@ fun LocalMusicScreen(
             }
         }
     }
+}
+
+private fun groupSongsBySplitArtists(songs: List<Song>): Map<String, List<Song>> {
+    val map = LinkedHashMap<String, MutableList<Song>>()
+    for (song in songs) {
+        val artists = LocalMediaRepository.splitArtists(song.artist)
+        if (artists.isEmpty()) {
+            map.getOrPut(song.artist.ifBlank { "Unknown Artist" }) { mutableListOf() }.add(song)
+        } else {
+            for (artist in artists) {
+                map.getOrPut(artist) { mutableListOf() }.add(song)
+            }
+        }
+    }
+    return map
 }
 
 // ── Songs tab ─────────────────────────────────────────────────────────────────
@@ -869,6 +895,15 @@ private fun ArtistRow(
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
 ) {
+    var artistArtUrl by remember(name) {
+        mutableStateOf(AppleArtistArtRepository.cached(name)?.heroUrl ?: thumbnailUrl)
+    }
+    LaunchedEffect(name) {
+        val art = AppleArtistArtRepository.artFor(name)
+        if (art != null) {
+            artistArtUrl = art.heroUrl
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -890,9 +925,9 @@ private fun ArtistRow(
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.size(26.dp),
             )
-            if (thumbnailUrl != null) {
+            if (artistArtUrl != null) {
                 AsyncImage(
-                    model = thumbnailUrl.artworkAt(ROW_ART_PX),
+                    model = artistArtUrl.artworkAt(ROW_ART_PX),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -936,6 +971,15 @@ private fun ArtistGridCard(
     onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    var artistArtUrl by remember(name) {
+        mutableStateOf(AppleArtistArtRepository.cached(name)?.heroUrl ?: thumbnailUrl)
+    }
+    LaunchedEffect(name) {
+        val art = AppleArtistArtRepository.artFor(name)
+        if (art != null) {
+            artistArtUrl = art.heroUrl
+        }
+    }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -957,9 +1001,9 @@ private fun ArtistGridCard(
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.size(44.dp),
             )
-            if (thumbnailUrl != null) {
+            if (artistArtUrl != null) {
                 AsyncImage(
-                    model = thumbnailUrl.artworkAt(CARD_ART_PX),
+                    model = artistArtUrl.artworkAt(CARD_ART_PX),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -1348,9 +1392,25 @@ private fun DrillDownHeader(
     label: String,
     artworkUrl: String?,
     songs: List<Song>,
+    isArtist: Boolean = false,
+    onOpenOnlineArtist: ((String) -> Unit)? = null,
+    onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
     onBack: () -> Unit,
     onMore: (() -> Unit)?,
 ) {
+    var resolvedArt by remember(label, artworkUrl, isArtist) {
+        mutableStateOf(
+            if (isArtist) AppleArtistArtRepository.cached(label)?.heroUrl ?: artworkUrl
+            else artworkUrl
+        )
+    }
+    LaunchedEffect(label, isArtist) {
+        if (isArtist) {
+            val art = AppleArtistArtRepository.artFor(label)
+            if (art != null) resolvedArt = art.heroUrl
+        }
+    }
+    val artShape = if (isArtist) CircleShape else RoundedCornerShape(16.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1382,21 +1442,21 @@ private fun DrillDownHeader(
         }
         Box(
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp).size(188.dp)
-                .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
+                .clip(artShape).background(MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = if (artworkUrl == null) Icons.Rounded.Person else Icons.Rounded.Album,
+                imageVector = if (isArtist) Icons.Rounded.Person else Icons.Rounded.Album,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.size(64.dp),
             )
-            artworkUrl?.let { artwork ->
+            resolvedArt?.let { artwork ->
                 AsyncImage(
                     model = artwork.artworkAt(CARD_ART_PX),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().clip(artShape),
                 )
             }
         }
@@ -1412,7 +1472,7 @@ private fun DrillDownHeader(
         )
         Text(
             text = buildString {
-                if (artworkUrl == null) append("Artist").append(" · ")
+                if (isArtist) append(stringResource(R.string.artist)).append(" · ")
                 append(pluralStringResource(R.plurals.track_count_plural, songs.size, songs.size))
             },
             style = MaterialTheme.typography.bodyMedium,
@@ -1420,6 +1480,70 @@ private fun DrillDownHeader(
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+        if (isArtist && onOpenOnlineArtist != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), CircleShape)
+                        .clickable { onOpenOnlineArtist(label) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.Person,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.view_online_artist),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        } else if (!isArtist && onOpenOnlineAlbum != null) {
+            val albumArtist = songs.firstOrNull()?.artist.orEmpty()
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), CircleShape)
+                        .clickable { onOpenOnlineAlbum(label, albumArtist) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.Album,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.view_online_album),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1486,6 +1610,9 @@ private fun DrillDownSongList(
     /** The release's cover, where it has one — see [CollectionArtwork]. */
     artworkUrl: String?,
     songs: List<Song>,
+    isArtist: Boolean = false,
+    onOpenOnlineArtist: ((String) -> Unit)? = null,
+    onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
     viewType: LibraryViewType,
     selectedIds: Set<String> = emptySet(),
     currentSong: Song? = null,
@@ -1521,6 +1648,9 @@ private fun DrillDownSongList(
                     label = label,
                     artworkUrl = artworkUrl,
                     songs = songs,
+                    isArtist = isArtist,
+                    onOpenOnlineArtist = onOpenOnlineArtist,
+                    onOpenOnlineAlbum = onOpenOnlineAlbum,
                     onBack = onBack,
                     onMore = onMore,
                 )
@@ -1556,6 +1686,9 @@ private fun DrillDownSongList(
                     label = label,
                     artworkUrl = artworkUrl,
                     songs = songs,
+                    isArtist = isArtist,
+                    onOpenOnlineArtist = onOpenOnlineArtist,
+                    onOpenOnlineAlbum = onOpenOnlineAlbum,
                     onBack = onBack,
                     onMore = onMore,
                 )

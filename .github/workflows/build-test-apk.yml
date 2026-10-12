@@ -36,7 +36,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Dev Debug APK
-        run: ./gradlew assembleDevDebug
+        run: ./gradlew assembleDevDebug --stacktrace
 
       - name: Prepare APKs
         run: |

@@ -24,7 +24,7 @@ class LocalAudioCoverFetcher(
     private val uriStr: String,
 ) : Fetcher {
 
-    override suspend fun fetch(): FetchResult? {
+    override suspend fun fetch(): FetchResult {
         val rawUri = uriStr.removePrefix("audio:")
         val uri = Uri.parse(rawUri)
         val retriever = MediaMetadataRetriever()
@@ -47,7 +47,7 @@ class LocalAudioCoverFetcher(
             null
         } finally {
             try { retriever.release() } catch (_: Throwable) {}
-        } ?: return null
+        } ?: throw java.io.FileNotFoundException("No embedded artwork found for $rawUri")
 
         val mimeType = if (pic.size >= 8 &&
             pic[0] == 0x89.toByte() &&

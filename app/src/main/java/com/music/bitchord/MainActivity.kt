@@ -809,6 +809,9 @@ private fun BitChordApp(
     val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
+    val preventDuplicateTracks by AppSettings.preventDuplicateTracks.collectAsStateWithLifecycle()
+    val isLocalIndexing by LocalMediaRepository.isIndexing.collectAsStateWithLifecycle()
+    val localIndexedCount by LocalMediaRepository.indexedCount.collectAsStateWithLifecycle()
     val webdavUrl by AppSettings.webdavUrl.collectAsStateWithLifecycle()
     val smbHost by AppSettings.smbHost.collectAsStateWithLifecycle()
     val librarySort by AppSettings.librarySort.collectAsStateWithLifecycle()
@@ -857,7 +860,7 @@ private fun BitChordApp(
             viewModel.reloadLocalDetail(open)
         }
     }
-    LaunchedEffect(localMusicFolderUri, filterNonMusicAudio) {
+    LaunchedEffect(localMusicFolderUri, filterNonMusicAudio, preventDuplicateTracks) {
         viewModel.loadLibrarySongs()
         if (detail?.browseId == "local:all") {
             viewModel.reloadLocalDetail("local:all")
@@ -2850,6 +2853,9 @@ private fun BitChordApp(
                             isDownloads = page.browseId == "local:downloads",
                             currentSong = player.song,
                             isPlaying = player.isPlaying,
+                            isIndexing = isLocalIndexing,
+                            indexedCount = localIndexedCount,
+                            onRefresh = { viewModel.refreshLocalMusic() },
                             onDeleteDownloads = { selected ->
                                 scope.launch {
                                     selected.forEach { song -> Downloads.delete(context, song.videoId) }

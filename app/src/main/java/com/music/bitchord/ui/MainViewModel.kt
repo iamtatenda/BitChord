@@ -1402,6 +1402,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             AppSettings.filterNonMusicAudio.drop(1).collect {
+                val context = getApplication<Application>()
+                LocalMediaRepository.clearCache(context)
+                if (_detailStack.value.any { page -> page.browseId == "local:all" }) {
+                    reloadLocalDetail("local:all")
+                }
+            }
+        }
+        viewModelScope.launch {
+            AppSettings.preventDuplicateTracks.drop(1).collect {
+                val context = getApplication<Application>()
+                LocalMediaRepository.clearCache(context)
                 if (_detailStack.value.any { page -> page.browseId == "local:all" }) {
                     reloadLocalDetail("local:all")
                 }
@@ -1960,16 +1971,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadLibrarySongs() {
         viewModelScope.launch {
             val context = getApplication<Application>()
-            _librarySongs.value = if (!LocalMediaRepository.hasStoragePermission(context)) {
-                UiState.Error(text(R.string.storage_required_read))
+            if (!LocalMediaRepository.hasStoragePermission(context)) {
+                _librarySongs.value = UiState.Error(text(R.string.storage_required_read))
             } else {
-                runCatching { LocalMediaRepository.getLocalMusic(context) }.fold(
-                    onSuccess = { songs ->
-                        if (songs.isEmpty()) UiState.Error(text(R.string.no_local_audio_found))
-                        else UiState.Success(songs)
-                    },
-                    onFailure = { UiState.Error(text(R.string.no_local_audio_found)) },
-                )
+                val cached = LocalMediaRepository.getCachedLocalMusic(context)
+                if (cached.isNotEmpty()) {
+                    _librarySongs.value = UiState.Success(cached)
+                    launch {
+                        runCatching {
+                            val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
+                            if (fresh != cached && fresh.isNotEmpty()) {
+                                _librarySongs.value = UiState.Success(fresh)
+                            }
+                        }
+                    }
+                } else {
+                    runCatching { LocalMediaRepository.scanAndCacheLocalMusic(context) }.fold(
+                        onSuccess = { songs ->
+                            if (songs.isEmpty()) UiState.Error(text(R.string.no_local_audio_found))
+                            else UiState.Success(songs)
+                        },
+                        onFailure = { UiState.Error(text(R.string.no_local_audio_found)) },
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Performs an explicit, on-demand rescan of device local music,
+     * updating both the detail stack and library state.
+     */
+    fun refreshLocalMusic() {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            if (!LocalMediaRepository.hasStoragePermission(context)) {
+                _detailStack.value = _detailStack.value.map {
+                    if (it.browseId == "local:all") {
+                        it.copy(songs = UiState.Error(text(R.string.storage_required_read)))
+                    } else it
+                }
+                return@launch
+            }
+            runCatching {
+                val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
+                val state = if (fresh.isEmpty()) UiState.Error(text(R.string.no_local_audio_found)) else UiState.Success(fresh)
+                _detailStack.value = _detailStack.value.map {
+                    if (it.browseId == "local:all") {
+                        it.copy(songs = state)
+                    } else it
+                }
+                _librarySongs.value = state
             }
         }
     }
@@ -2512,9 +2564,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (!LocalMediaRepository.hasStoragePermission(context)) {
                         UiState.Error(text(R.string.storage_required_read))
                     } else {
-                        val songs = LocalMediaRepository.getLocalMusic(context)
-                        if (songs.isEmpty()) UiState.Error(text(R.string.no_local_audio_found))
-                        else UiState.Success(songs)
+                        val cached = LocalMediaRepository.getCachedLocalMusic(context)
+                        if (cached.isNotEmpty()) {
+                            viewModelScope.launch {
+                                runCatching {
+                                    val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
+                                    if (fresh != cached) {
+                                        _detailStack.value = _detailStack.value.map {
+                                            if (it.browseId == "local:all") {
+                                                it.copy(songs = UiState.Success(fresh))
+                                            } else it
+                                        }
+                                    }
+                                }
+                            }
+                            UiState.Success(cached)
+                        } else {
+                            val songs = LocalMediaRepository.scanAndCacheLocalMusic(context)
+                            if (songs.isEmpty()) UiState.Error(text(R.string.no_local_audio_found))
+                            else UiState.Success(songs)
+                        }
                     }
                 }
                 resolved == BrowseType.ARTIST -> {
@@ -2710,7 +2779,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (!LocalMediaRepository.hasStoragePermission(context)) {
                         UiState.Error(text(R.string.storage_required_read))
                     } else {
-                        val songs = LocalMediaRepository.getLocalMusic(context)
+                        val songs = LocalMediaRepository.scanAndCacheLocalMusic(context)
                         if (songs.isEmpty()) UiState.Error(text(R.string.no_local_audio_found))
                         else UiState.Success(songs)
                     }

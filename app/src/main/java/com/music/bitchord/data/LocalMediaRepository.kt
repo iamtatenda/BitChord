@@ -18,13 +18,115 @@ import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.Locale
+
+@Serializable
+internal data class CachedLocalSong(
+    val videoId: String,
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String? = null,
+    val durationText: String? = null,
+    val albumName: String? = null,
+    val localUri: String? = null,
+    val localPath: String? = null,
+    val localDateAddedSeconds: Long? = null,
+    val localDateModifiedSeconds: Long? = null,
+) {
+    fun toSong(): Song = Song(
+        videoId = videoId,
+        title = title,
+        artist = artist,
+        thumbnailUrl = thumbnailUrl,
+        durationText = durationText,
+        albumName = albumName,
+        localUri = localUri,
+        localPath = localPath,
+        localDateAddedSeconds = localDateAddedSeconds,
+        localDateModifiedSeconds = localDateModifiedSeconds,
+    )
+
+    companion object {
+        fun fromSong(s: Song): CachedLocalSong = CachedLocalSong(
+            videoId = s.videoId,
+            title = s.title,
+            artist = s.artist,
+            thumbnailUrl = s.thumbnailUrl,
+            durationText = s.durationText,
+            albumName = s.albumName,
+            localUri = s.localUri,
+            localPath = s.localPath,
+            localDateAddedSeconds = s.localDateAddedSeconds,
+            localDateModifiedSeconds = s.localDateModifiedSeconds,
+        )
+    }
+}
 
 object LocalMediaRepository {
 
     private const val TAG = "BitChord"
     private const val MIN_LOCAL_MUSIC_DURATION_MS = 30_000L
+    private const val CACHE_FILE_NAME = "local_library_cache.json"
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+
+    val isIndexing = MutableStateFlow(false)
+    val indexedCount = MutableStateFlow(0)
+
+    @Volatile
+    private var cachedSongsMemory: List<Song>? = null
+
+    fun hasCachedLocalMusic(context: Context): Boolean {
+        if (!cachedSongsMemory.isNullOrEmpty()) return true
+        val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
+        return cacheFile.exists() && cacheFile.length() > 0L
+    }
+
+    fun getCachedLocalMusic(context: Context): List<Song> {
+        cachedSongsMemory?.let { return it }
+        val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
+        if (!cacheFile.exists() || cacheFile.length() == 0L) return emptyList()
+        return runCatching {
+            val text = cacheFile.readText(Charsets.UTF_8)
+            val cached = json.decodeFromString<List<CachedLocalSong>>(text)
+            val mapped = cached.map { it.toSong() }
+            cachedSongsMemory = mapped
+            mapped
+        }.getOrElse { err ->
+            Log.w(TAG, "Failed reading $CACHE_FILE_NAME: ${err.message}")
+            emptyList()
+        }
+    }
+
+    fun saveCachedLocalMusic(context: Context, songs: List<Song>) {
+        cachedSongsMemory = songs
+        runCatching {
+            val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
+            val tmpFile = File(context.filesDir, "$CACHE_FILE_NAME.tmp")
+            val mapped = songs.map { CachedLocalSong.fromSong(it) }
+            val jsonStr = json.encodeToString(mapped)
+            tmpFile.writeText(jsonStr, Charsets.UTF_8)
+            if (tmpFile.exists()) {
+                if (cacheFile.exists()) cacheFile.delete()
+                tmpFile.renameTo(cacheFile)
+            }
+        }.onFailure { err ->
+            Log.w(TAG, "Failed saving $CACHE_FILE_NAME: ${err.message}")
+        }
+    }
+
+    fun clearCache(context: Context) {
+        cachedSongsMemory = null
+        runCatching {
+            val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
+            if (cacheFile.exists()) cacheFile.delete()
+        }
+    }
 
     // `mp4` only ever reaches this list as an audio row — MediaStore files a
     // video .mp4 under Video, not Audio — so it is the audio-only MP4s Dolby
@@ -185,12 +287,32 @@ object LocalMediaRepository {
         takeUnless { it.isNullOrBlank() || it == "<unknown>" }
 
     /**
-     * Queries MediaStore for all audio files available on the device.
+     * Retrieves all device local music.
+     * Returns cached library immediately when available (Namida parity),
+     * or triggers a full scan if no cache is present or forceRefresh is true.
      */
-    suspend fun getLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
+    suspend fun getLocalMusic(context: Context, forceRefresh: Boolean = false): List<Song> = withContext(Dispatchers.IO) {
         if (!hasStoragePermission(context)) return@withContext emptyList()
 
-        val songs = mutableListOf<Song>()
+        if (!forceRefresh) {
+            val cached = getCachedLocalMusic(context)
+            if (cached.isNotEmpty()) return@withContext cached
+        }
+
+        scanAndCacheLocalMusic(context)
+    }
+
+    /**
+     * Executes the comprehensive indexing scan across MediaStore volumes,
+     * physical filesystem paths and SAF trees, deduplicating and caching the result to disk.
+     */
+    suspend fun scanAndCacheLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
+        if (!hasStoragePermission(context)) return@withContext emptyList()
+
+        isIndexing.value = true
+        indexedCount.value = 0
+        try {
+            val songs = mutableListOf<Song>()
         // This scan runs over every audio file on the device, which includes
         // whatever this app has downloaded into Music/BitChord alongside
         // everything else — but by content URI, the only thing MediaStore
@@ -334,6 +456,7 @@ object LocalMediaRepository {
                     }
                 }
             }.onFailure { Log.w(TAG, "Failed scanning volume $volumeUri: ${it.message}") }
+            indexedCount.value = songs.size
         }
 
         // Also query MediaStore.Files across all volumes to catch audio files that
@@ -442,6 +565,7 @@ object LocalMediaRepository {
                     }
                 }
             }.onFailure { Log.w(TAG, "Failed scanning MediaStore.Files on $filesVolumeUri: ${it.message}") }
+            indexedCount.value = songs.size
         }
 
         // Direct file discovery on selected folder and standard storage paths
@@ -514,6 +638,7 @@ object LocalMediaRepository {
                     }
                 }
             }.onFailure { Log.w(TAG, "Direct folder scan failed for ${folder.path}: ${it.message}") }
+            indexedCount.value = songs.size
         }
 
         // Also if SAF tree URI is configured, walk using fast DocumentsContract queries
@@ -587,12 +712,93 @@ object LocalMediaRepository {
                 }
 
                 scanSafFast(rootDocId, 15, null)
+                indexedCount.value = songs.size
             }.onFailure { Log.w(TAG, "Fast SAF tree scan failed: ${it.message}") }
         }
 
-        songs.distinctBy { song ->
-            song.localPath?.normalizedPath() ?: song.localUri ?: song.videoId
+        val deduplicated = deduplicateTracks(songs, AppSettings.preventDuplicateTracks.value)
+        saveCachedLocalMusic(context, deduplicated)
+        indexedCount.value = deduplicated.size
+        deduplicated
+    } finally {
+        isIndexing.value = false
+    }
+}
+
+    internal fun deduplicateTracks(
+        tracks: List<Song>,
+        preventDuplicates: Boolean,
+    ): List<Song> {
+        if (tracks.isEmpty()) return emptyList()
+
+        // 1. Physical path / unique URI deduplication (always active)
+        val uniqueByPathOrUri = mutableMapOf<String, Song>()
+        for (song in tracks) {
+            val pathKey = song.localPath?.normalizedPath()
+            val uriKey = song.localUri ?: song.videoId
+            val key = pathKey ?: uriKey
+            val existing = uniqueByPathOrUri[key]
+            if (existing == null || isBetterSongEntry(song, existing)) {
+                uniqueByPathOrUri[key] = song
+            }
         }
+
+        val primaryList = uniqueByPathOrUri.values.toList()
+        if (!preventDuplicates) {
+            return primaryList
+        }
+
+        // 2. Namida-parity smart deduplication across directories & storage volumes
+        val resultMap = mutableMapOf<String, Song>()
+        for (song in primaryList) {
+            val cleanTitle = song.title.trim().lowercase(Locale.ROOT)
+            val cleanArtist = song.artist.trim().lowercase(Locale.ROOT)
+            val fileName = (song.localPath?.substringAfterLast('/') ?: song.title.removeAudioExtension()).trim().lowercase(Locale.ROOT)
+            val duration = song.durationText?.trim() ?: ""
+
+            val canonicalKey = when {
+                // High confidence match: non-unknown artist and non-blank title
+                cleanArtist != "unknown artist" && cleanTitle.isNotBlank() && cleanTitle.length > 2 -> {
+                    "meta:$cleanArtist::$cleanTitle"
+                }
+                // Specific filename match
+                fileName.isNotBlank() && !isGenericTrackFileName(fileName) -> {
+                    "file:$fileName::$duration"
+                }
+                // Fallback to exact path or uri
+                else -> {
+                    "path:${song.localPath?.normalizedPath() ?: song.localUri ?: song.videoId}"
+                }
+            }
+
+            val existing = resultMap[canonicalKey]
+            if (existing == null || isBetterSongEntry(song, existing)) {
+                resultMap[canonicalKey] = song
+            }
+        }
+
+        return resultMap.values.toList()
+    }
+
+    private fun isGenericTrackFileName(name: String): Boolean {
+        val base = name.substringBeforeLast('.').trim().lowercase(Locale.ROOT)
+        return base.matches(Regex("""^(track\s*\d+|\d+|audio\s*\d+|sound\s*\d+|untitled|voice\s*\d+)$"""))
+    }
+
+    private fun isBetterSongEntry(candidate: Song, current: Song): Boolean {
+        var scoreCandidate = 0
+        var scoreCurrent = 0
+        if (!candidate.durationText.isNullOrBlank()) scoreCandidate += 2
+        if (!current.durationText.isNullOrBlank()) scoreCurrent += 2
+        if (!candidate.albumName.isNullOrBlank()) scoreCandidate += 2
+        if (!current.albumName.isNullOrBlank()) scoreCurrent += 2
+        if (candidate.artist != "Unknown Artist" && candidate.artist.isNotBlank()) scoreCandidate += 1
+        if (current.artist != "Unknown Artist" && current.artist.isNotBlank()) scoreCurrent += 1
+        if (!candidate.localPath.isNullOrBlank()) scoreCandidate += 1
+        if (!current.localPath.isNullOrBlank()) scoreCurrent += 1
+        if (candidate.thumbnailUrl != null && !candidate.thumbnailUrl.startsWith("audio:")) scoreCandidate += 1
+        if (current.thumbnailUrl != null && !current.thumbnailUrl.startsWith("audio:")) scoreCurrent += 1
+        return scoreCandidate > scoreCurrent
     }
 
     /** Human-readable path for the folder setting without exposing provider internals. */

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.Folder
@@ -235,6 +236,7 @@ fun SettingsScreen(
     val preferMusicOnly by AppSettings.preferMusicOnly.collectAsStateWithLifecycle()
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
+    val preventDuplicateTracks by AppSettings.preventDuplicateTracks.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
     val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
@@ -1123,6 +1125,25 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setFilterNonMusicAudio(!filterNonMusicAudio) },
+                )
+            }
+            val preventDuplicatesTitle = stringResource(R.string.prevent_duplicate_tracks)
+            row(preventDuplicatesTitle, "duplicate", "duplicate tracks") {
+                SettingsRow(
+                    icon = Icons.Rounded.ContentCopy,
+                    title = preventDuplicatesTitle,
+                    subtitle = stringResource(R.string.prevent_duplicate_tracks_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = preventDuplicateTracks,
+                            onCheckedChange = AppSettings::setPreventDuplicateTracks,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setPreventDuplicateTracks(!preventDuplicateTracks) },
                 )
             }
         }

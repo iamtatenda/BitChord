@@ -353,6 +353,11 @@
     <string name="download_quality_subtitle">%1$s per track, whatever the connection</string>
     <string name="filter_non_music_audio">Filter non-music audio</string>
     <string name="filter_non_music_audio_subtitle">Hides clips under 30 seconds, WAV files, voice notes, recordings and system sounds</string>
+    <string name="prevent_duplicate_tracks">Prevent duplicate tracks</string>
+    <string name="prevent_duplicate_tracks_subtitle">Combines identical files and titles found across multiple folders or storage volumes</string>
+    <string name="indexing_library_progress">Indexing library (%1$d tracks found)…</string>
+    <string name="indexing_library_searching">Indexing library…</string>
+    <string name="refresh_library">Refresh library</string>
     <string name="performance">Performance</string>
     <string name="high_performance_mode">High performance mode</string>
     <string name="high_performance_subtitle">Uses full animations and blur, and requests a higher display refresh rate</string>

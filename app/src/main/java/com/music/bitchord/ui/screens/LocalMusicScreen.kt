@@ -2,8 +2,11 @@ package com.music.bitchord.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -54,9 +57,11 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Sort
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -70,12 +75,15 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -172,6 +180,9 @@ fun LocalMusicScreen(
     isDownloads: Boolean = false,
     currentSong: Song? = null,
     isPlaying: Boolean = false,
+    isIndexing: Boolean = false,
+    indexedCount: Int = 0,
+    onRefresh: (() -> Unit)? = null,
     /** Deletes the Downloads rows selected through this screen's long-press mode. */
     onDeleteDownloads: ((List<Song>) -> Unit)? = null,
     /** Copies the selected Downloads rows to the WebDAV server; null hides the action. */
@@ -195,7 +206,17 @@ fun LocalMusicScreen(
     } else {
         AppSettings.localMusicViewType.collectAsStateWithLifecycle()
     }
-    val sortedSongs = remember(songs, sortOrder) { songs.sortedForLibrary(sortOrder) }
+    var sortedSongs by remember(songs, sortOrder) {
+        mutableStateOf(if (songs.size <= 200) songs.sortedForLibrary(sortOrder) else songs)
+    }
+    LaunchedEffect(songs, sortOrder) {
+        if (songs.size > 200) {
+            val sorted = withContext(Dispatchers.Default) {
+                songs.sortedForLibrary(sortOrder)
+            }
+            sortedSongs = sorted
+        }
+    }
     var selectedDownloadIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     // Kept separately from the tracks selected for deletion: different albums
     // can share tracks, so inferring an album's selection from those track ids
@@ -300,6 +321,8 @@ fun LocalMusicScreen(
                 if (isDownloads) AppSettings.setDownloadedMusicViewType(next)
                 else AppSettings.setLocalMusicViewType(next)
             },
+            isDownloads = isDownloads,
+            onRefresh = onRefresh,
             modifier = Modifier.padding(
                 // The same clearance every other page under the frosted bar
                 // gets — see topBarContentPadding, which this screen can't use
@@ -311,6 +334,39 @@ fun LocalMusicScreen(
                 bottom = 4.dp,
             ),
         )
+
+        if (!isDownloads) {
+            AnimatedVisibility(
+                visible = isIndexing,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PAGE_GUTTER, vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = if (indexedCount > 0)
+                            stringResource(R.string.indexing_library_progress, indexedCount)
+                        else
+                            stringResource(R.string.indexing_library_searching),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
 
         // ── Tab row ──────────────────────────────────────────────────────────
         TabRow(
@@ -369,6 +425,36 @@ fun LocalMusicScreen(
             modifier = Modifier.fillMaxSize(),
         ) { key ->
             when {
+                // Initial scan in progress and nothing loaded yet
+                sortedSongs.isEmpty() && isIndexing -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bodyContentPadding),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                strokeWidth = 3.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                text = if (indexedCount > 0)
+                                    stringResource(R.string.indexing_library_progress, indexedCount)
+                                else
+                                    stringResource(R.string.indexing_library_searching),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
                 // Nothing to tab through. The tab row stays put rather than
                 // being swapped out with the list, so the page still reads as
                 // itself while it says why it's empty.
@@ -414,9 +500,22 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_SONGS" -> {
-                    val filteredSongs = remember(sortedSongs, searchQuery) {
-                        if (searchQuery.isBlank()) sortedSongs
-                        else sortedSongs.filter { it.matchesSearch(searchQuery) }
+                    var filteredSongs by remember(sortedSongs, searchQuery) {
+                        mutableStateOf(
+                            if (searchQuery.isBlank()) sortedSongs
+                            else if (sortedSongs.size <= 200) sortedSongs.filter { it.matchesSearch(searchQuery) }
+                            else emptyList()
+                        )
+                    }
+                    LaunchedEffect(sortedSongs, searchQuery) {
+                        if (searchQuery.isNotBlank() && sortedSongs.size > 200) {
+                            val filtered = withContext(Dispatchers.Default) {
+                                sortedSongs.filter { it.matchesSearch(searchQuery) }
+                            }
+                            filteredSongs = filtered
+                        } else if (searchQuery.isBlank()) {
+                            filteredSongs = sortedSongs
+                        }
                     }
                     SongsTab(
                         songs = filteredSongs,
@@ -444,11 +543,26 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_ARTISTS" -> {
-                    val artists = remember(sortedSongs, searchQuery) {
-                        sortedSongs.groupBy { it.artist }
-                            .entries
-                            .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
-                            .sortedBy { it.key.lowercase(Locale.ROOT) }
+                    var artists by remember(sortedSongs, searchQuery) {
+                        mutableStateOf(
+                            if (sortedSongs.size <= 200) {
+                                sortedSongs.groupBy { it.artist }
+                                    .entries
+                                    .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
+                                    .sortedBy { it.key.lowercase(Locale.ROOT) }
+                            } else emptyList()
+                        )
+                    }
+                    LaunchedEffect(sortedSongs, searchQuery) {
+                        if (sortedSongs.size > 200) {
+                            val result = withContext(Dispatchers.Default) {
+                                sortedSongs.groupBy { it.artist }
+                                    .entries
+                                    .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
+                                    .sortedBy { it.key.lowercase(Locale.ROOT) }
+                            }
+                            artists = result
+                        }
                     }
                     ArtistsTab(
                         artists = artists,
@@ -465,11 +579,27 @@ fun LocalMusicScreen(
 
                 else -> {
                     // LOCAL_TAB_ALBUMS
-                    val albums = remember(sortedSongs, collections, searchQuery) {
-                        albumEntries(sortedSongs, collections).filter {
-                            searchQuery.isBlank() ||
-                                it.title.contains(searchQuery, ignoreCase = true) ||
-                                it.artist.contains(searchQuery, ignoreCase = true)
+                    var albums by remember(sortedSongs, collections, searchQuery) {
+                        mutableStateOf(
+                            if (sortedSongs.size <= 200) {
+                                albumEntries(sortedSongs, collections).filter {
+                                    searchQuery.isBlank() ||
+                                        it.title.contains(searchQuery, ignoreCase = true) ||
+                                        it.artist.contains(searchQuery, ignoreCase = true)
+                                }
+                            } else emptyList()
+                        )
+                    }
+                    LaunchedEffect(sortedSongs, collections, searchQuery) {
+                        if (sortedSongs.size > 200) {
+                            val result = withContext(Dispatchers.Default) {
+                                albumEntries(sortedSongs, collections).filter {
+                                    searchQuery.isBlank() ||
+                                        it.title.contains(searchQuery, ignoreCase = true) ||
+                                        it.artist.contains(searchQuery, ignoreCase = true)
+                                }
+                            }
+                            albums = result
                         }
                     }
                     AlbumsTab(
@@ -537,7 +667,7 @@ private fun SongsTab(
                     modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
                 )
             }
-            itemsIndexed(songs, key = { index, song -> "${song.videoId}_$index" }) { index, song ->
+            itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                 SongGridCard(
                     song = song,
                     selected = song.videoId in selectedIds,
@@ -562,7 +692,7 @@ private fun SongsTab(
                     title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
                 )
             }
-            itemsIndexed(songs, key = { index, song -> "${song.videoId}_$index" }) { index, song ->
+            itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                 SongRow(
                     song = song,
                     selected = song.videoId in selectedIds,
@@ -1402,7 +1532,7 @@ private fun DrillDownSongList(
                     onShuffle = onShuffle,
                 )
             }
-            itemsIndexed(songs, key = { index, song -> "${song.videoId}_$index" }) { index, song ->
+            itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                 SongGridCard(
                     song = song,
                     selected = song.videoId in selectedIds,
@@ -1437,7 +1567,7 @@ private fun DrillDownSongList(
                     onShuffle = onShuffle,
                 )
             }
-            itemsIndexed(songs, key = { index, song -> "${song.videoId}_$index" }) { index, song ->
+            itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                 SongRow(
                     song = song,
                     selected = song.videoId in selectedIds,
@@ -1503,6 +1633,8 @@ private fun LocalSearchField(
     onSortOrderChange: (LocalMusicSort) -> Unit,
     viewType: LibraryViewType,
     onViewTypeToggle: () -> Unit,
+    isDownloads: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var sortMenuOpen by remember { mutableStateOf(false) }
@@ -1617,6 +1749,26 @@ private fun LocalSearchField(
                         },
                     )
                 }
+            }
+        }
+        if (!isDownloads && onRefresh != null) {
+            Spacer(Modifier.width(2.dp))
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        haptics.play(Haptic.Select)
+                        onRefresh()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Refresh,
+                    contentDescription = stringResource(R.string.refresh_library),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(19.dp),
+                )
             }
         }
     }

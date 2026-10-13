@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SwapVert
@@ -172,6 +173,10 @@ fun BrowseActionsSheet(
      */
     onDeleteDownload: (() -> Unit)? = null,
     /**
+     * Resolves and downloads missing artwork and metadata for offline/downloaded albums.
+     */
+    onEnhanceMetadata: (() -> Unit)? = null,
+    /**
      * [SongActionsPresentation.Menu] draws only the rows, compact, for the
      * popup a held card lifts into — [HeldContextMenu] shows the card itself,
      * so the header here would only say the same thing twice.
@@ -271,6 +276,9 @@ fun BrowseActionsSheet(
                     target.type.localizedOpenLabel(),
                     onClick = it,
                 )
+            }
+            onEnhanceMetadata?.let {
+                ActionRow(Icons.Rounded.Image, stringResource(R.string.enhance_album_art), onClick = it)
             }
             onShare?.let {
                 ActionRow(Icons.Rounded.Share, stringResource(R.string.share), onClick = it)

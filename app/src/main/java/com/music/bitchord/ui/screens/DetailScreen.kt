@@ -1755,7 +1755,7 @@ private fun SuggestedSongRow(
 private fun List<HomeShelf>.topRelease(): ShelfItem? =
     asSequence()
         .flatMap { it.items.asSequence() }
-        .filter { it.browseId?.startsWith("MPRE") == true }
+        .filter { it.browseId?.startsWith("MPRE") == true || it.browseId?.startsWith("local:album:") == true }
         .withIndex()
         .maxWithOrNull(
             compareBy<IndexedValue<ShelfItem>> { it.value.releaseYear() ?: 0 }

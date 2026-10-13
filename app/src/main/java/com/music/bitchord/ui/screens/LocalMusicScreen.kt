@@ -204,6 +204,8 @@ fun LocalMusicScreen(
     onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
     /** Opens an album in the full release DetailScreen view. */
     onOpenAlbum: ((AlbumEntry) -> Unit)? = null,
+    /** Opens an artist in the full release DetailScreen view. */
+    onOpenArtist: ((String, List<Song>) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Which top-level tab is selected.
@@ -713,10 +715,14 @@ fun LocalMusicScreen(
                         listState = artistsListState,
                         gridState = artistsGridState,
                         onArtistClick = { artist, artistSongs ->
-                            drillDownLabel = artist
-                            drillDownSongs = artistSongs
-                            drillDownArt = null
-                            drillDownIsArtist = true
+                            if (onOpenArtist != null) {
+                                onOpenArtist(artist, artistSongs)
+                            } else {
+                                drillDownLabel = artist
+                                drillDownSongs = artistSongs
+                                drillDownArt = null
+                                drillDownIsArtist = true
+                            }
                         },
                         onArtistLongPress = onCollectionLongPress,
                         contentPadding = bodyContentPadding,
@@ -897,9 +903,10 @@ private fun SongGridCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(36.dp),
             )
-            if (song.thumbnailUrl != null) {
+            val resolvedArt = rememberRemoteArtworkUrl(song)
+            if (resolvedArt != null) {
                 AsyncImage(
-                    model = song.thumbnailUrl.artworkAt(CARD_ART_PX),
+                    model = resolvedArt.artworkAt(CARD_ART_PX),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

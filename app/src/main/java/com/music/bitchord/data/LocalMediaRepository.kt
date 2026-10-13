@@ -129,6 +129,67 @@ object LocalMediaRepository {
         }
     }
 
+    /**
+     * Updates songs in memory and disk cache with resolved artwork URLs.
+     */
+    fun updateSongsArtwork(context: Context, updated: Map<String, String>) {
+        if (updated.isEmpty()) return
+        val current = cachedSongsMemory ?: getCachedLocalMusic(context)
+        if (current.isEmpty()) return
+        val newSongs = current.map { song ->
+            val newArt = updated[song.videoId] ?: updated[song.localUri]
+            if (newArt != null && newArt != song.thumbnailUrl) {
+                song.copy(thumbnailUrl = newArt)
+            } else {
+                song
+            }
+        }
+        saveCachedLocalMusic(context, newSongs)
+    }
+
+    /**
+     * Asynchronously enriches local albums and songs that lack cover art.
+     * Groups by album to minimize network lookups, writes cover.jpg for third-party players,
+     * and persists discovered artwork to the local library cache.
+     */
+    suspend fun enrichLibraryArtwork(context: Context, songs: List<Song>) = withContext(Dispatchers.IO) {
+        val missingArt = songs.filter { s ->
+            val t = s.thumbnailUrl
+            t.isNullOrBlank() || t.startsWith("audio:")
+        }
+        if (missingArt.isEmpty()) return@withContext
+
+        val byAlbum = missingArt.groupBy { "${it.artist}:::${it.albumName ?: ""}" }
+        val updates = mutableMapOf<String, String>()
+
+        for ((key, albumTracks) in byAlbum) {
+            val parts = key.split(":::")
+            val artist = parts.getOrNull(0).orEmpty()
+            val album = parts.getOrNull(1).orEmpty()
+
+            val foundArt = if (album.isNotBlank()) {
+                OnlineArtworkRepository.resolveAlbumArt(context, artist, album)
+            } else {
+                val first = albumTracks.firstOrNull()
+                if (first != null && first.title.isNotBlank()) {
+                    OnlineArtworkRepository.resolveSongArt(context, artist, first.title, null)
+                } else null
+            }
+
+            if (foundArt != null) {
+                OnlineArtworkRepository.saveCoverToAlbumFolder(context, albumTracks, foundArt)
+                for (track in albumTracks) {
+                    updates[track.videoId] = foundArt
+                    track.localUri?.let { updates[it] = foundArt }
+                }
+            }
+        }
+
+        if (updates.isNotEmpty()) {
+            updateSongsArtwork(context, updates)
+        }
+    }
+
     // `mp4` only ever reaches this list as an audio row — MediaStore files a
     // video .mp4 under Video, not Audio — so it is the audio-only MP4s Dolby
     // and Apple music downloads come as (AC-4, E-AC-3, ALAC). `dsf`/`dff` are
@@ -729,6 +790,9 @@ object LocalMediaRepository {
         saveCachedLocalMusic(context, deduplicated)
         indexedCount.value = deduplicated.size
         liveDiscoveredSongs.value = deduplicated
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            runCatching { enrichLibraryArtwork(context, deduplicated) }
+        }
         deduplicated
     } finally {
         isIndexing.value = false

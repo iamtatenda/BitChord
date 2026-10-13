@@ -1159,4 +1159,8 @@
     <string name="download_artist_separator_title">Artist separator</string>
     <string name="download_artist_separator_desc">Delimiter for multiple artists across audio tags</string>
     <string name="download_export_active_folder">Saving to %1$s</string>
+    <string name="enhance_album_art">Find missing album art</string>
+    <string name="enhancing_album_art">Finding album artwork…</string>
+    <string name="album_art_updated">Album artwork updated</string>
+    <string name="album_art_not_found">Could not find artwork for this album</string>
 </resources>

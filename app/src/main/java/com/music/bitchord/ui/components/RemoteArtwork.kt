@@ -37,17 +37,26 @@ fun rememberRemoteArtworkUrl(song: Song?): String? {
                     resolved = RemoteArtworkStore.resolveArt(context, song)
                 }
             }
-            // Local file (content:// MediaStore URI, file path, or local: videoId):
-            // always attempt iTunes to upgrade blank/low-res embedded art.
+            // Local file (content:// MediaStore URI, file path, audio: URI, or local: videoId):
+            // always attempt online lookup to resolve missing or low-res embedded art.
             song.artist.isNotBlank() && song.title.isNotBlank() &&
                 (resolved.isNullOrBlank() ||
+                    resolved!!.startsWith("audio:") ||
                     resolved!!.startsWith("content://") ||
-                    song.videoId.startsWith("local:")) -> {
+                    resolved!!.startsWith("file://") ||
+                    song.videoId.startsWith("local:") ||
+                    song.localUri != null ||
+                    song.localPath != null) -> {
                 val found = OnlineArtworkRepository.resolveSongArt(
                     context, song.artist, song.title, song.albumName,
                 )
                 // Only replace if we found something — never downgrade.
-                if (found != null) resolved = found
+                if (found != null) {
+                    resolved = found
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        OnlineArtworkRepository.saveCoverToAlbumFolder(context, song, found)
+                    }
+                }
             }
             // Online track with an HTTPS thumbnail: nothing to do.
             else -> Unit

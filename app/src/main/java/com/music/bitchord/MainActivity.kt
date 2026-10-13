@@ -2877,6 +2877,9 @@ private fun BitChordApp(
                                     key = entry.key,
                                 )
                             },
+                            onOpenArtist = { name, songs ->
+                                viewModel.openLocalArtist(name, songs)
+                            },
                             onOpenOnlineArtist = { name ->
                                 openByName(null, name, null, BrowseType.ARTIST)
                             },
@@ -4593,6 +4596,11 @@ private fun BitChordApp(
                             },
                     )
                 }.takeIf { remote },
+                onEnhanceMetadata = if (!remote && target.type == BrowseType.ALBUM) {
+                    act { songs ->
+                        viewModel.enhanceLocalAlbum(target.title, target.subtitle, songs)
+                    }
+                } else null,
                 // The same link a share off YouTube Music's own overflow
                 // gives — built from the browse id rather than fetched,
                 // since nothing about it depends on the tracks or the
@@ -5357,7 +5365,8 @@ private fun SongSort.localizedLabel(): String = when (this) {
 private fun String?.isDeviceFolder(): Boolean =
     this != null && startsWith("local:") &&
         !startsWith(Downloads.PLAYLIST_PREFIX) &&
-        !startsWith("local:album:")
+        !startsWith("local:album:") &&
+        !startsWith("local:artist:")
 
 /**
  * Whether [videoId] is the track playing, and is known to be playing YouTube's

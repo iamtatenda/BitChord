@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1162,7 +1163,7 @@ private fun ArtistGridCard(
  * an album, and the order its tracks go in — and none of those has anywhere to
  * live in a map entry.
  */
-internal class AlbumEntry(
+class AlbumEntry(
     val title: String,
     val artist: String,
     val thumbnailUrl: String?,

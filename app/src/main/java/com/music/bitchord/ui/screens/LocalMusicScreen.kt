@@ -2330,11 +2330,11 @@ private fun List<Song>.sortedForLibrary(order: LocalMusicSort): List<Song> = whe
             .thenBy { it.title.lowercase(Locale.ROOT) },
     )
     LocalMusicSort.DURATION_ASC -> sortedWith(
-        compareBy<Song> { it.durationSeconds ?: 0 }
+        compareBy<Song> { com.music.bitchord.data.sources.TrackMatcher.secondsOf(it.durationText) ?: 0 }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
     )
     LocalMusicSort.DURATION_DESC -> sortedWith(
-        compareByDescending<Song> { it.durationSeconds ?: 0 }
+        compareByDescending<Song> { com.music.bitchord.data.sources.TrackMatcher.secondsOf(it.durationText) ?: 0 }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
     )
 }

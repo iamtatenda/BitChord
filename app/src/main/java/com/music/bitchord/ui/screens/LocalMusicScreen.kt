@@ -85,6 +85,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1393,6 +1394,7 @@ private fun CollectionArtwork(url: String?, playlist: Boolean, size: Dp) {
 
 // ── Drill-down song list ───────────────────────────────────────────────────────
 
+
 /**
  * Aspect ratio for artist hero photos — very slightly taller than wide,
  * matching the online DetailScreen's ARTIST_PHOTO_RATIO constant.
@@ -1400,26 +1402,36 @@ private fun CollectionArtwork(url: String?, playlist: Boolean, size: Dp) {
 private const val DRILL_ARTIST_RATIO = 0.95f
 
 /**
- * Aspect ratio for album/playlist hero banners — wider than tall,
- * as a release cover is always square but we want a cinematic crop here.
+ * Aspect ratio for album/playlist hero banners — one-to-one square cover
+ * displayed cinematic: just enough height for impact without hiding songs.
  */
-private const val DRILL_ALBUM_RATIO = 0.56f   // 16:9-ish
+private const val DRILL_ALBUM_RATIO = 0.72f
 
+/**
+ * The full-bleed hero photo pinned *behind* the scroll list.
+ *
+ * This is the offline equivalent of DetailScreen's [PageBackground]: drawn as a
+ * sibling of the list with [Modifier.matchParentSize], it covers the full device
+ * width without being subject to any horizontal padding the list may apply.
+ * A parallax [IntOffset] keeps it in step with the list exactly as the online
+ * artist page does — the photo scrolls away as the track list scrolls up.
+ *
+ * The gradient scrim matches the online page's wash stops exactly.
+ */
 @Composable
-private fun DrillDownHeader(
+private fun DrillDownHeroBackground(
     label: String,
     artworkUrl: String?,
-    songs: List<Song>,
-    isArtist: Boolean = false,
-    onOpenOnlineArtist: ((String) -> Unit)? = null,
-    onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
-    onBack: () -> Unit,
-    onMore: (() -> Unit)?,
+    isArtist: Boolean,
+    heroHeight: androidx.compose.ui.unit.Dp,
+    listFirstVisibleIndex: Int,
+    listFirstVisibleScrollOffset: Int,
+    modifier: Modifier = Modifier,
 ) {
     var resolvedArt by remember(label, artworkUrl, isArtist) {
         mutableStateOf(
             if (isArtist) AppleArtistArtRepository.cached(label)?.heroUrl ?: artworkUrl
-            else artworkUrl
+            else artworkUrl,
         )
     }
     LaunchedEffect(label, isArtist) {
@@ -1432,176 +1444,209 @@ private fun DrillDownHeader(
     val bgColor = MaterialTheme.colorScheme.background
     val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val density = LocalDensity.current
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(heroHeight)
+            .clipToBounds()
+            // Parallax: when the header item is first (index 0), offset by how
+            // far it has scrolled; once it leaves, park the image off-screen.
+            .offset {
+                val offsetPx = if (listFirstVisibleIndex == 0)
+                    -listFirstVisibleScrollOffset
+                else
+                    -(with(density) { heroHeight.toPx() } * 2f).toInt()
+                IntOffset(0, offsetPx)
+            },
+    ) {
+        // Neutral placeholder behind the image.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isArtist) Icons.Rounded.Person else Icons.Rounded.Album,
+                contentDescription = null,
+                tint = onSurfaceVariant.copy(alpha = 0.35f),
+                modifier = Modifier.size(80.dp),
+            )
+        }
+
+        // Hero image — crop-fills, subject never letterboxed.
+        resolvedArt?.let { url ->
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // Gradient scrim — matches the online DetailScreen's PageBackground
+        // wash stops exactly: transparent top half dissolving to page colour.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.00f to Color.Transparent,
+                        0.45f to Color.Transparent,
+                        0.65f to bgColor.copy(alpha = 0.30f),
+                        0.82f to bgColor.copy(alpha = 0.72f),
+                        0.94f to bgColor.copy(alpha = 0.95f),
+                        1.00f to bgColor,
+                    ),
+                ),
+        )
+    }
+}
+
+/**
+ * The in-list header item for an artist / album drill-down.
+ *
+ * Only holds a Spacer the same height as the hero, the artist/album name and
+ * subtitle overlaid at the bottom of that space, and floating back / ⋮ buttons
+ * at the top. The actual photo is drawn by [DrillDownHeroBackground] pinned
+ * behind the scroll list — keeping this item free of any horizontal constraints.
+ */
+@Composable
+private fun DrillDownHeroListItem(
+    label: String,
+    songs: List<Song>,
+    isArtist: Boolean,
+    heroHeight: androidx.compose.ui.unit.Dp,
+    onBack: () -> Unit,
+    onMore: (() -> Unit)?,
+    onOpenOnlineArtist: ((String) -> Unit)?,
+    onOpenOnlineAlbum: ((String, String) -> Unit)?,
+) {
     val primary = MaterialTheme.colorScheme.primary
     val onSurface = MaterialTheme.colorScheme.onSurface
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
     val outlineVariant = MaterialTheme.colorScheme.outlineVariant
 
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth(),
+    // Outer box sized to heroHeight so the list reserves exactly the right room.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(heroHeight),
     ) {
-        val ratio = if (isArtist) DRILL_ARTIST_RATIO else DRILL_ALBUM_RATIO
-        val heroHeight = (maxWidth * ratio).coerceAtMost(maxHeight * 0.65f)
-
-        // ── Hero image block ─────────────────────────────────────────────────
+        // ── Back arrow — top-left, floating over the image ───────────────────
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(heroHeight)
-                .clipToBounds(),
+                .align(Alignment.TopStart)
+                .padding(start = 8.dp, top = 8.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.38f))
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
         ) {
-            // Placeholder / background tint while art loads.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = if (isArtist) Icons.Rounded.Person else Icons.Rounded.Album,
-                    contentDescription = null,
-                    tint = onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.size(72.dp),
-                )
-            }
-            // Hero photo — Crop-fills the box so the subject is never letterboxed.
-            resolvedArt?.let { url ->
-                AsyncImage(
-                    model = url.artworkAt(CARD_ART_PX),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-
-            // Gradient scrim — transparent at the top, opaque at the bottom,
-            // so the name text is always legible over any photo.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0.00f to Color.Transparent,
-                            0.45f to Color.Transparent,
-                            0.68f to bgColor.copy(alpha = 0.35f),
-                            0.84f to bgColor.copy(alpha = 0.78f),
-                            0.96f to bgColor.copy(alpha = 0.97f),
-                            1.00f to bgColor,
-                        ),
-                    ),
+            Icon(
+                Icons.Rounded.ArrowBack,
+                contentDescription = stringResource(R.string.back),
+                tint = Color.White,
+                modifier = Modifier.size(20.dp),
             )
+        }
 
-            // ── Back arrow — top-left, floating over the image ───────────────
+        // ── ⋮ — top-right, floating over the image ──────────────────────────
+        onMore?.let { more ->
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 8.dp, top = 8.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(end = 8.dp, top = 8.dp)
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .clickable(onClick = onBack),
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(onClick = more),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Rounded.ArrowBack,
-                    contentDescription = stringResource(R.string.back),
+                    Icons.Rounded.MoreHoriz,
+                    contentDescription = stringResource(R.string.more),
                     tint = Color.White,
                     modifier = Modifier.size(20.dp),
                 )
             }
-
-            // ── ⋮ — top-right, floating over the image ──────────────────────
-            onMore?.let { more ->
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(end = 8.dp, top = 8.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.35f))
-                        .clickable(onClick = more),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Rounded.MoreHoriz,
-                        contentDescription = stringResource(R.string.more),
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-
-            // ── Name + subtitle — bottom of the hero over the gradient ───────
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 16.dp),
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = buildString {
-                        if (isArtist) append(stringResource(R.string.artist)).append(" · ")
-                        append(pluralStringResource(R.plurals.track_count_plural, songs.size, songs.size))
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.80f),
-                )
-            }
         }
-        // End hero image block
 
-        // ── Online bridge pill — below the hero ──────────────────────────────
-        val albumArtist = songs.firstOrNull()?.artist.orEmpty()
-        val showOnlinePill = (isArtist && onOpenOnlineArtist != null) ||
-            (!isArtist && onOpenOnlineAlbum != null)
-        if (showOnlinePill) {
-            Row(
+        // ── Name + subtitle — bottom-start, over gradient ────────────────────
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 16.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = buildString {
+                    if (isArtist) append(stringResource(R.string.artist)).append(" · ")
+                    append(pluralStringResource(R.plurals.track_count_plural, songs.size, songs.size))
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.82f),
+            )
+        }
+    }
+
+    // ── Online bridge pill — below the hero ─────────────────────────────────
+    val albumArtist = songs.firstOrNull()?.artist.orEmpty()
+    val showOnlinePill = (isArtist && onOpenOnlineArtist != null) ||
+        (!isArtist && onOpenOnlineAlbum != null)
+    if (showOnlinePill) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp, start = PAGE_GUTTER, end = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = heroHeight + 10.dp, start = PAGE_GUTTER, end = PAGE_GUTTER),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(surfaceVariant.copy(alpha = 0.7f))
-                        .border(0.5.dp, outlineVariant.copy(alpha = 0.5f), CircleShape)
-                        .clickable {
-                            if (isArtist) onOpenOnlineArtist?.invoke(label)
-                            else onOpenOnlineAlbum?.invoke(label, albumArtist)
-                        }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (isArtist) Icons.Rounded.Person else Icons.Rounded.Album,
-                            contentDescription = null,
-                            tint = primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(
-                                if (isArtist) R.string.view_online_artist
-                                else R.string.view_online_album,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = onSurface,
-                        )
+                    .clip(CircleShape)
+                    .background(surfaceVariant.copy(alpha = 0.72f))
+                    .border(0.5.dp, outlineVariant.copy(alpha = 0.5f), CircleShape)
+                    .clickable {
+                        if (isArtist) onOpenOnlineArtist?.invoke(label)
+                        else onOpenOnlineAlbum?.invoke(label, albumArtist)
                     }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isArtist) Icons.Rounded.Person else Icons.Rounded.Album,
+                        contentDescription = null,
+                        tint = primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(
+                            if (isArtist) R.string.view_online_artist
+                            else R.string.view_online_album,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = onSurface,
+                    )
                 }
             }
         }
     }
 }
+
+
 
 @Composable
 private fun DrillDownActionRow(
@@ -1723,177 +1768,215 @@ private fun DrillDownSongList(
     // the albums grid.  Non-artist drill-downs always show the flat list.
     val showAlbumsGrid = isArtist && albumDrillDown == null
 
-    if (viewType == LibraryViewType.GRID && !showAlbumsGrid) {
-        val gridState = rememberLazyGridState()
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 140.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = PAGE_GUTTER,
-                end = PAGE_GUTTER,
-                top = 0.dp,
-                bottom = contentPadding.calculateBottomPadding() + 8.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                DrillDownHeader(
-                    label = displayLabel,
-                    artworkUrl = displayArt,
-                    songs = displaySongs,
-                    isArtist = displayIsArtist,
-                    onOpenOnlineArtist = onOpenOnlineArtist,
-                    onOpenOnlineAlbum = onOpenOnlineAlbum,
-                    onBack = if (albumDrillDown != null) {{ albumDrillDown = null }} else onBack,
-                    onMore = if (albumDrillDown != null) null else onMore,
-                )
-            }
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                DrillDownActionRow(
-                    songs = displaySongs,
-                    onSongClick = onSongClick,
-                    onShuffle = onShuffle,
-                )
-            }
-            itemsIndexed(displaySongs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
-                SongGridCard(
-                    song = song,
-                    selected = song.videoId in selectedIds,
-                    isCurrent = song.isSameTrackAs(currentSong),
-                    isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
-                    searchPlayingStyle = true,
-                    onClick = { onSongClick(displaySongs, index) },
-                    onLongPress = { onSongLongPress(song) },
-                )
-            }
-        }
-    } else if (showAlbumsGrid) {
-        // ── Artist top-level: albums grid followed by all songs ──────────────
-        val gridState = rememberLazyGridState()
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 140.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = PAGE_GUTTER,
-                end = PAGE_GUTTER,
-                top = 0.dp,
-                bottom = contentPadding.calculateBottomPadding() + 8.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                DrillDownHeader(
-                    label = label,
-                    artworkUrl = artworkUrl,
-                    songs = songs,
-                    isArtist = true,
-                    onOpenOnlineArtist = onOpenOnlineArtist,
-                    onOpenOnlineAlbum = onOpenOnlineAlbum,
-                    onBack = onBack,
-                    onMore = onMore,
-                )
-            }
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                DrillDownActionRow(
-                    songs = songs,
-                    onSongClick = onSongClick,
-                    onShuffle = onShuffle,
-                )
-            }
-            if (artistAlbums.isNotEmpty()) {
+    // ── Two-layer layout: pinned background + scrollable list ────────────────
+    // The hero image is drawn as a sibling of the scroll list (matchParentSize),
+    // exactly like DetailScreen's PageBackground.  The list item only holds a
+    // Spacer of the same height — nothing is constrained by the list's padding.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val ratio = if (displayIsArtist) DRILL_ARTIST_RATIO else DRILL_ALBUM_RATIO
+        val heroHeight = (maxWidth * ratio).coerceAtMost(maxHeight * 0.65f)
+
+        if (viewType == LibraryViewType.GRID && !showAlbumsGrid) {
+            val gridState = rememberLazyGridState()
+            // ── Pinned hero background ────────────────────────────────────────
+            DrillDownHeroBackground(
+                label = displayLabel,
+                artworkUrl = displayArt,
+                isArtist = displayIsArtist,
+                heroHeight = heroHeight,
+                listFirstVisibleIndex = gridState.firstVisibleItemIndex,
+                listFirstVisibleScrollOffset = gridState.firstVisibleItemScrollOffset,
+                modifier = Modifier.matchParentSize(),
+            )
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 140.dp),
+                state = gridState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = PAGE_GUTTER,
+                    end = PAGE_GUTTER,
+                    top = 0.dp,
+                    bottom = contentPadding.calculateBottomPadding() + 8.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    SectionHeader(
-                        icon = Icons.Rounded.Album,
-                        title = pluralStringResource(R.plurals.album_count, artistAlbums.size, artistAlbums.size),
-                        modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
+                    DrillDownHeroListItem(
+                        label = displayLabel,
+                        songs = displaySongs,
+                        isArtist = displayIsArtist,
+                        heroHeight = heroHeight,
+                        onBack = if (albumDrillDown != null) { { albumDrillDown = null } } else onBack,
+                        onMore = if (albumDrillDown != null) null else onMore,
+                        onOpenOnlineArtist = onOpenOnlineArtist,
+                        onOpenOnlineAlbum = onOpenOnlineAlbum,
                     )
                 }
-                items(artistAlbums, key = { it.key }) { entry ->
-                    AlbumGridCard(
-                        entry = entry,
-                        selected = false,
-                        onClick = { albumDrillDown = entry },
-                        onLongPress = {},
-                    )
-                }
-            }
-            if (songs.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    SectionHeader(
-                        icon = Icons.Rounded.MusicNote,
-                        title = pluralStringResource(R.plurals.track_count_plural, songs.size, songs.size),
-                        modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
+                    DrillDownActionRow(
+                        songs = displaySongs,
+                        onSongClick = onSongClick,
+                        onShuffle = onShuffle,
                     )
                 }
-                itemsIndexed(songs, key = { _, song -> "artist_song:${song.localUri ?: song.localPath ?: song.videoId}" }) { index, song ->
+                itemsIndexed(displaySongs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                     SongGridCard(
                         song = song,
                         selected = song.videoId in selectedIds,
                         isCurrent = song.isSameTrackAs(currentSong),
                         isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
                         searchPlayingStyle = true,
-                        onClick = { onSongClick(songs, index) },
+                        onClick = { onSongClick(displaySongs, index) },
                         onLongPress = { onSongLongPress(song) },
                     )
                 }
             }
-        }
-    } else {
-        // ── Non-artist (or album-within-artist): flat track list ─────────────
-        val listState = rememberLazyListState()
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding,
-        ) {
-            item {
-                DrillDownHeader(
-                    label = displayLabel,
-                    artworkUrl = displayArt,
-                    songs = displaySongs,
-                    isArtist = displayIsArtist,
-                    onOpenOnlineArtist = onOpenOnlineArtist,
-                    onOpenOnlineAlbum = onOpenOnlineAlbum,
-                    onBack = if (albumDrillDown != null) {{ albumDrillDown = null }} else onBack,
-                    onMore = if (albumDrillDown != null) null else onMore,
-                )
-            }
-            item {
-                DrillDownActionRow(
-                    songs = displaySongs,
-                    onSongClick = onSongClick,
-                    onShuffle = onShuffle,
-                )
-            }
-            itemsIndexed(displaySongs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
-                SongRow(
-                    song = song,
-                    selected = song.videoId in selectedIds,
-                    isCurrent = song.isSameTrackAs(currentSong),
-                    isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
-                    searchPlayingStyle = true,
-                    activeTint = PlayingAccent,
-                    trackNumber = index + 1,
-                    onClick = { onSongClick(displaySongs, index) },
-                    onLongPress = { onSongLongPress(song) },
-                    onMore = onSongMore?.let { more -> { more(song) } },
-                    onSwipeToQueue = { onSongSwipe(song) },
-                )
-                if (index < displaySongs.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = NUMBERED_ROW_DIVIDER_INSET),
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        } else if (showAlbumsGrid) {
+            // ── Artist top-level: albums grid followed by all songs ───────────
+            val gridState = rememberLazyGridState()
+            DrillDownHeroBackground(
+                label = label,
+                artworkUrl = artworkUrl,
+                isArtist = true,
+                heroHeight = heroHeight,
+                listFirstVisibleIndex = gridState.firstVisibleItemIndex,
+                listFirstVisibleScrollOffset = gridState.firstVisibleItemScrollOffset,
+                modifier = Modifier.matchParentSize(),
+            )
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 140.dp),
+                state = gridState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = PAGE_GUTTER,
+                    end = PAGE_GUTTER,
+                    top = 0.dp,
+                    bottom = contentPadding.calculateBottomPadding() + 8.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    DrillDownHeroListItem(
+                        label = label,
+                        songs = songs,
+                        isArtist = true,
+                        heroHeight = heroHeight,
+                        onBack = onBack,
+                        onMore = onMore,
+                        onOpenOnlineArtist = onOpenOnlineArtist,
+                        onOpenOnlineAlbum = onOpenOnlineAlbum,
                     )
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    DrillDownActionRow(
+                        songs = songs,
+                        onSongClick = onSongClick,
+                        onShuffle = onShuffle,
+                    )
+                }
+                if (artistAlbums.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHeader(
+                            icon = Icons.Rounded.Album,
+                            title = pluralStringResource(R.plurals.album_count, artistAlbums.size, artistAlbums.size),
+                            modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
+                        )
+                    }
+                    items(artistAlbums, key = { it.key }) { entry ->
+                        AlbumGridCard(
+                            entry = entry,
+                            selected = false,
+                            onClick = { albumDrillDown = entry },
+                            onLongPress = {},
+                        )
+                    }
+                }
+                if (songs.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHeader(
+                            icon = Icons.Rounded.MusicNote,
+                            title = pluralStringResource(R.plurals.track_count_plural, songs.size, songs.size),
+                            modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
+                        )
+                    }
+                    itemsIndexed(songs, key = { _, song -> "artist_song:${song.localUri ?: song.localPath ?: song.videoId}" }) { index, song ->
+                        SongGridCard(
+                            song = song,
+                            selected = song.videoId in selectedIds,
+                            isCurrent = song.isSameTrackAs(currentSong),
+                            isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
+                            searchPlayingStyle = true,
+                            onClick = { onSongClick(songs, index) },
+                            onLongPress = { onSongLongPress(song) },
+                        )
+                    }
+                }
+            }
+        } else {
+            // ── Non-artist (or album-within-artist): flat track list ──────────
+            val listState = rememberLazyListState()
+            DrillDownHeroBackground(
+                label = displayLabel,
+                artworkUrl = displayArt,
+                isArtist = displayIsArtist,
+                heroHeight = heroHeight,
+                listFirstVisibleIndex = listState.firstVisibleItemIndex,
+                listFirstVisibleScrollOffset = listState.firstVisibleItemScrollOffset,
+                modifier = Modifier.matchParentSize(),
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+            ) {
+                item {
+                    DrillDownHeroListItem(
+                        label = displayLabel,
+                        songs = displaySongs,
+                        isArtist = displayIsArtist,
+                        heroHeight = heroHeight,
+                        onBack = if (albumDrillDown != null) { { albumDrillDown = null } } else onBack,
+                        onMore = if (albumDrillDown != null) null else onMore,
+                        onOpenOnlineArtist = onOpenOnlineArtist,
+                        onOpenOnlineAlbum = onOpenOnlineAlbum,
+                    )
+                }
+                item {
+                    DrillDownActionRow(
+                        songs = displaySongs,
+                        onSongClick = onSongClick,
+                        onShuffle = onShuffle,
+                    )
+                }
+                itemsIndexed(displaySongs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
+                    SongRow(
+                        song = song,
+                        selected = song.videoId in selectedIds,
+                        isCurrent = song.isSameTrackAs(currentSong),
+                        isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
+                        searchPlayingStyle = true,
+                        activeTint = PlayingAccent,
+                        trackNumber = index + 1,
+                        onClick = { onSongClick(displaySongs, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onMore = onSongMore?.let { more -> { more(song) } },
+                        onSwipeToQueue = { onSongSwipe(song) },
+                    )
+                    if (index < displaySongs.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = NUMBERED_ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
+                    }
                 }
             }
         }
     }
 }
+
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 

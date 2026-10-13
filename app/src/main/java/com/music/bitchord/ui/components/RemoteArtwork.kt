@@ -15,6 +15,13 @@ import com.music.bitchord.data.remote.RemoteArtworkStore
  * A drawable art URL for [song]: its own thumbnail when it has one, else the
  * embedded picture pulled out of the remote file, else auto-discovered from iTunes
  * using track metadata (artist + title/album).
+ *
+ * For local songs the thumbnail may be a MediaStore content:// URI — Coil can load
+ * those, but files without embedded album art still produce a blank image. We
+ * therefore always attempt an iTunes lookup in the background for any local song
+ * (content:// thumbnail or no thumbnail at all), preferring the higher-resolution
+ * iTunes result over the MediaStore one once it arrives. Online tracks whose
+ * thumbnailUrl is already an HTTPS URL are left completely untouched.
  */
 @Composable
 fun rememberRemoteArtworkUrl(song: Song?): String? {
@@ -22,14 +29,30 @@ fun rememberRemoteArtworkUrl(song: Song?): String? {
     val key = song?.localUri ?: song?.localPath ?: song?.videoId
     var resolved by remember(key) { mutableStateOf(song?.thumbnailUrl) }
     LaunchedEffect(key) {
-        if (song != null && (resolved == null || resolved.isNullOrBlank())) {
-            if (song.videoId.startsWith("webdav:") || song.videoId.startsWith("smb:")) {
-                resolved = RemoteArtworkStore.resolveArt(context, song)
-            } else if (song.artist.isNotBlank() && song.title.isNotBlank()) {
-                val found = OnlineArtworkRepository.resolveSongArt(context, song.artist, song.title, song.albumName)
+        if (song == null) return@LaunchedEffect
+        when {
+            // WebDAV / SMB remote: extract from the stream itself.
+            song.videoId.startsWith("webdav:") || song.videoId.startsWith("smb:") -> {
+                if (resolved.isNullOrBlank()) {
+                    resolved = RemoteArtworkStore.resolveArt(context, song)
+                }
+            }
+            // Local file (content:// MediaStore URI, file path, or local: videoId):
+            // always attempt iTunes to upgrade blank/low-res embedded art.
+            song.artist.isNotBlank() && song.title.isNotBlank() &&
+                (resolved.isNullOrBlank() ||
+                    resolved!!.startsWith("content://") ||
+                    song.videoId.startsWith("local:")) -> {
+                val found = OnlineArtworkRepository.resolveSongArt(
+                    context, song.artist, song.title, song.albumName,
+                )
+                // Only replace if we found something — never downgrade.
                 if (found != null) resolved = found
             }
+            // Online track with an HTTPS thumbnail: nothing to do.
+            else -> Unit
         }
     }
     return resolved
 }
+

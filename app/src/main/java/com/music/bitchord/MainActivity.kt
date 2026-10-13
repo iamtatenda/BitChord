@@ -2868,6 +2868,15 @@ private fun BitChordApp(
                             isIndexing = isLocalIndexing,
                             indexedCount = localIndexedCount,
                             onRefresh = { viewModel.refreshLocalMusic() },
+                            onOpenAlbum = { entry ->
+                                viewModel.openLocalAlbum(
+                                    title = entry.title,
+                                    artist = entry.artist,
+                                    thumbnailUrl = entry.thumbnailUrl,
+                                    songs = entry.songs,
+                                    key = entry.key,
+                                )
+                            },
                             onOpenOnlineArtist = { name ->
                                 openByName(null, name, null, BrowseType.ARTIST)
                             },
@@ -5346,7 +5355,9 @@ private fun SongSort.localizedLabel(): String = when (this) {
  * gets. See [Downloads.PLAYLIST_PREFIX] for why they share a namespace at all.
  */
 private fun String?.isDeviceFolder(): Boolean =
-    this != null && startsWith("local:") && !startsWith(Downloads.PLAYLIST_PREFIX)
+    this != null && startsWith("local:") &&
+        !startsWith(Downloads.PLAYLIST_PREFIX) &&
+        !startsWith("local:album:")
 
 /**
  * Whether [videoId] is the track playing, and is known to be playing YouTube's

@@ -2420,12 +2420,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
          */
 
         fun browseTypeOf(browseId: String, fallback: BrowseType = BrowseType.OTHER): BrowseType = when {
+            browseId.startsWith("local:album:") -> BrowseType.ALBUM
             browseId.startsWith(Downloads.PLAYLIST_PREFIX) -> BrowseType.PLAYLIST
             browseId.startsWith("UC") -> BrowseType.ARTIST
             browseId.startsWith("MPREb") || browseId.startsWith("VLOLAK") || browseId.startsWith("OLAK") -> BrowseType.ALBUM
             browseId.startsWith("VL") || browseId.startsWith("PL") -> BrowseType.PLAYLIST
             else -> fallback
         }
+    }
+
+    /**
+     * Opens an offline or downloaded album in the full [DetailScreen] release view.
+     */
+    fun openLocalAlbum(
+        title: String,
+        artist: String,
+        thumbnailUrl: String?,
+        songs: List<Song>,
+        key: String = "$title:$artist",
+    ) {
+        val browseId = "local:album:$key"
+        if (_detailStack.value.lastOrNull()?.browseId == browseId) return
+        _detailStack.value += DetailPage(
+            browseId = browseId,
+            title = title,
+            subtitle = artist,
+            thumbnailUrl = thumbnailUrl,
+            songs = UiState.Success(songs),
+            type = BrowseType.ALBUM,
+        )
     }
 
     /**
@@ -2484,6 +2507,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         ) return
         if (browseId.startsWith(SPOTIFY_PAGE_PREFIX)) {
             openSpotifyPage(browseId, title, subtitle, thumbnailUrl)
+            return
+        }
+        if (browseId.startsWith("local:album:")) {
             return
         }
         val resolved = browseTypeOf(browseId, type)

@@ -31,8 +31,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -83,6 +85,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalDensity
@@ -198,10 +201,81 @@ fun LocalMusicScreen(
     onUploadToWebDav: ((List<Song>) -> Unit)? = null,
     onOpenOnlineArtist: ((String) -> Unit)? = null,
     onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
+    /** Opens an album in the full release DetailScreen view. */
+    onOpenAlbum: ((AlbumEntry) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Which top-level tab is selected.
     var selectedTab by rememberSaveable { mutableIntStateOf(LOCAL_TAB_SONGS) }
+
+    // Scroll states for each tab, hoisted and initialized from cache so scroll positions are never lost when navigating into drill-downs or detail pages
+    val songsListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastSongIndex,
+        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastSongOffset,
+    )
+    val songsGridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastSongGridIndex,
+        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastSongGridOffset,
+    )
+    val artistsListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastArtistIndex,
+        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastArtistOffset,
+    )
+    val artistsGridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastArtistGridIndex,
+        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastArtistGridOffset,
+    )
+    val albumsListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastAlbumIndex,
+        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastAlbumOffset,
+    )
+    val albumsGridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastAlbumGridIndex,
+        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastAlbumGridOffset,
+    )
+
+    LaunchedEffect(songsListState) {
+        snapshotFlow { songsListState.firstVisibleItemIndex to songsListState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                LocalMusicDerivedCache.lastSongIndex = index
+                LocalMusicDerivedCache.lastSongOffset = offset
+            }
+    }
+    LaunchedEffect(songsGridState) {
+        snapshotFlow { songsGridState.firstVisibleItemIndex to songsGridState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                LocalMusicDerivedCache.lastSongGridIndex = index
+                LocalMusicDerivedCache.lastSongGridOffset = offset
+            }
+    }
+    LaunchedEffect(artistsListState) {
+        snapshotFlow { artistsListState.firstVisibleItemIndex to artistsListState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                LocalMusicDerivedCache.lastArtistIndex = index
+                LocalMusicDerivedCache.lastArtistOffset = offset
+            }
+    }
+    LaunchedEffect(artistsGridState) {
+        snapshotFlow { artistsGridState.firstVisibleItemIndex to artistsGridState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                LocalMusicDerivedCache.lastArtistGridIndex = index
+                LocalMusicDerivedCache.lastArtistGridOffset = offset
+            }
+    }
+    LaunchedEffect(albumsListState) {
+        snapshotFlow { albumsListState.firstVisibleItemIndex to albumsListState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                LocalMusicDerivedCache.lastAlbumIndex = index
+                LocalMusicDerivedCache.lastAlbumOffset = offset
+            }
+    }
+    LaunchedEffect(albumsGridState) {
+        snapshotFlow { albumsGridState.firstVisibleItemIndex to albumsGridState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                LocalMusicDerivedCache.lastAlbumGridIndex = index
+                LocalMusicDerivedCache.lastAlbumGridOffset = offset
+            }
+    }
 
     // Narrows whichever tab is showing — songs by title/artist/album, artists
     // and albums by name. Not saved across process death: a filter left on a
@@ -217,6 +291,29 @@ fun LocalMusicScreen(
     } else {
         AppSettings.localMusicViewType.collectAsStateWithLifecycle()
     }
+
+    LaunchedEffect(sortOrder) {
+        LocalMusicDerivedCache.resetScroll()
+        songsListState.scrollToItem(0)
+        songsGridState.scrollToItem(0)
+        artistsListState.scrollToItem(0)
+        artistsGridState.scrollToItem(0)
+        albumsListState.scrollToItem(0)
+        albumsGridState.scrollToItem(0)
+    }
+
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotBlank()) {
+            LocalMusicDerivedCache.resetScroll()
+            songsListState.scrollToItem(0)
+            songsGridState.scrollToItem(0)
+            artistsListState.scrollToItem(0)
+            artistsGridState.scrollToItem(0)
+            albumsListState.scrollToItem(0)
+            albumsGridState.scrollToItem(0)
+        }
+    }
+
     var sortedSongs by remember(songs, sortOrder) {
         mutableStateOf(if (songs.size <= 200) songs.sortedForLibrary(sortOrder) else songs)
     }
@@ -226,6 +323,70 @@ fun LocalMusicScreen(
                 songs.sortedForLibrary(sortOrder)
             }
             sortedSongs = sorted
+        }
+    }
+
+    var filteredSongs by remember(sortedSongs, searchQuery) {
+        mutableStateOf(
+            if (searchQuery.isBlank()) sortedSongs
+            else if (sortedSongs.size <= 200) sortedSongs.filter { it.matchesSearch(searchQuery) }
+            else emptyList()
+        )
+    }
+    LaunchedEffect(sortedSongs, searchQuery) {
+        if (searchQuery.isNotBlank() && sortedSongs.size > 200) {
+            val filtered = withContext(Dispatchers.Default) {
+                sortedSongs.filter { it.matchesSearch(searchQuery) }
+            }
+            filteredSongs = filtered
+        } else if (searchQuery.isBlank()) {
+            filteredSongs = sortedSongs
+        }
+    }
+
+    var artists by remember(sortedSongs, searchQuery) {
+        mutableStateOf(
+            LocalMusicDerivedCache.getArtists(sortedSongs).let { list ->
+                if (searchQuery.isBlank()) list
+                else list.filter { it.key.contains(searchQuery, ignoreCase = true) }
+            }
+        )
+    }
+    LaunchedEffect(sortedSongs, searchQuery) {
+        if (sortedSongs.size > 200) {
+            val result = withContext(Dispatchers.Default) {
+                LocalMusicDerivedCache.getArtists(sortedSongs).let { list ->
+                    if (searchQuery.isBlank()) list
+                    else list.filter { it.key.contains(searchQuery, ignoreCase = true) }
+                }
+            }
+            artists = result
+        }
+    }
+
+    var albums by remember(sortedSongs, collections, searchQuery) {
+        mutableStateOf(
+            LocalMusicDerivedCache.getAlbums(sortedSongs, collections).let { list ->
+                if (searchQuery.isBlank()) list
+                else list.filter {
+                    it.title.contains(searchQuery, ignoreCase = true) ||
+                        it.artist.contains(searchQuery, ignoreCase = true)
+                }
+            }
+        )
+    }
+    LaunchedEffect(sortedSongs, collections, searchQuery) {
+        if (sortedSongs.size > 200) {
+            val result = withContext(Dispatchers.Default) {
+                LocalMusicDerivedCache.getAlbums(sortedSongs, collections).let { list ->
+                    if (searchQuery.isBlank()) list
+                    else list.filter {
+                        it.title.contains(searchQuery, ignoreCase = true) ||
+                            it.artist.contains(searchQuery, ignoreCase = true)
+                    }
+                }
+            }
+            albums = result
         }
     }
     var selectedDownloadIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -490,6 +651,7 @@ fun LocalMusicScreen(
                         isArtist = drillDownIsArtist,
                         onOpenOnlineArtist = onOpenOnlineArtist,
                         onOpenOnlineAlbum = onOpenOnlineAlbum,
+                        onOpenAlbum = onOpenAlbum,
                         viewType = viewType,
                         selectedIds = selectedDownloadIds,
                         currentSong = currentSong,
@@ -516,26 +678,11 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_SONGS" -> {
-                    var filteredSongs by remember(sortedSongs, searchQuery) {
-                        mutableStateOf(
-                            if (searchQuery.isBlank()) sortedSongs
-                            else if (sortedSongs.size <= 200) sortedSongs.filter { it.matchesSearch(searchQuery) }
-                            else emptyList()
-                        )
-                    }
-                    LaunchedEffect(sortedSongs, searchQuery) {
-                        if (searchQuery.isNotBlank() && sortedSongs.size > 200) {
-                            val filtered = withContext(Dispatchers.Default) {
-                                sortedSongs.filter { it.matchesSearch(searchQuery) }
-                            }
-                            filteredSongs = filtered
-                        } else if (searchQuery.isBlank()) {
-                            filteredSongs = sortedSongs
-                        }
-                    }
                     SongsTab(
                         songs = filteredSongs,
                         viewType = viewType,
+                        listState = songsListState,
+                        gridState = songsGridState,
                         selectedIds = selectedDownloadIds,
                         currentSong = currentSong,
                         isPlaying = isPlaying,
@@ -559,30 +706,11 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_ARTISTS" -> {
-                    var artists by remember(sortedSongs, searchQuery) {
-                        mutableStateOf(
-                            if (sortedSongs.size <= 200) {
-                                groupSongsBySplitArtists(sortedSongs)
-                                    .entries
-                                    .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
-                                    .sortedBy { it.key.lowercase(Locale.ROOT) }
-                            } else emptyList()
-                        )
-                    }
-                    LaunchedEffect(sortedSongs, searchQuery) {
-                        if (sortedSongs.size > 200) {
-                            val result = withContext(Dispatchers.Default) {
-                                groupSongsBySplitArtists(sortedSongs)
-                                    .entries
-                                    .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
-                                    .sortedBy { it.key.lowercase(Locale.ROOT) }
-                            }
-                            artists = result
-                        }
-                    }
                     ArtistsTab(
                         artists = artists,
                         viewType = viewType,
+                        listState = artistsListState,
+                        gridState = artistsGridState,
                         onArtistClick = { artist, artistSongs ->
                             drillDownLabel = artist
                             drillDownSongs = artistSongs
@@ -596,41 +724,24 @@ fun LocalMusicScreen(
 
                 else -> {
                     // LOCAL_TAB_ALBUMS
-                    var albums by remember(sortedSongs, collections, searchQuery) {
-                        mutableStateOf(
-                            if (sortedSongs.size <= 200) {
-                                albumEntries(sortedSongs, collections).filter {
-                                    searchQuery.isBlank() ||
-                                        it.title.contains(searchQuery, ignoreCase = true) ||
-                                        it.artist.contains(searchQuery, ignoreCase = true)
-                                }
-                            } else emptyList()
-                        )
-                    }
-                    LaunchedEffect(sortedSongs, collections, searchQuery) {
-                        if (sortedSongs.size > 200) {
-                            val result = withContext(Dispatchers.Default) {
-                                albumEntries(sortedSongs, collections).filter {
-                                    searchQuery.isBlank() ||
-                                        it.title.contains(searchQuery, ignoreCase = true) ||
-                                        it.artist.contains(searchQuery, ignoreCase = true)
-                                }
-                            }
-                            albums = result
-                        }
-                    }
                     AlbumsTab(
                         albums = albums,
                         viewType = viewType,
+                        listState = albumsListState,
+                        gridState = albumsGridState,
                         selectedKeys = selectedAlbumKeys,
                         onAlbumClick = { entry ->
                             if (selectingDownloads) {
                                 toggleAlbumSelection(entry)
                             } else {
-                                drillDownLabel = entry.title
-                                drillDownSongs = entry.songs
-                                drillDownArt = entry.thumbnailUrl
-                                drillDownIsArtist = false
+                                if (onOpenAlbum != null) {
+                                    onOpenAlbum(entry)
+                                } else {
+                                    drillDownLabel = entry.title
+                                    drillDownSongs = entry.songs
+                                    drillDownArt = entry.thumbnailUrl
+                                    drillDownIsArtist = false
+                                }
                             }
                         },
                         onAlbumLongPress = { entry ->
@@ -668,6 +779,8 @@ private fun groupSongsBySplitArtists(songs: List<Song>): Map<String, List<Song>>
 private fun SongsTab(
     songs: List<Song>,
     viewType: LibraryViewType,
+    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     selectedIds: Set<String> = emptySet(),
     currentSong: Song? = null,
     isPlaying: Boolean = false,
@@ -679,7 +792,6 @@ private fun SongsTab(
     contentPadding: PaddingValues,
 ) {
     if (viewType == LibraryViewType.GRID) {
-        val gridState = rememberLazyGridState()
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 140.dp),
             state = gridState,
@@ -713,7 +825,6 @@ private fun SongsTab(
             }
         }
     } else {
-        val listState = rememberLazyListState()
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -826,12 +937,13 @@ private fun SongGridCard(
 private fun ArtistsTab(
     artists: List<Map.Entry<String, List<Song>>>,
     viewType: LibraryViewType,
+    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     onArtistClick: (String, List<Song>) -> Unit,
     onArtistLongPress: ((String, List<Song>) -> Unit)?,
     contentPadding: PaddingValues,
 ) {
     if (viewType == LibraryViewType.GRID) {
-        val gridState = rememberLazyGridState()
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 130.dp),
             state = gridState,
@@ -863,7 +975,6 @@ private fun ArtistsTab(
             }
         }
     } else {
-        val listState = rememberLazyListState()
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -1051,7 +1162,7 @@ private fun ArtistGridCard(
  * an album, and the order its tracks go in — and none of those has anywhere to
  * live in a map entry.
  */
-private class AlbumEntry(
+internal class AlbumEntry(
     val title: String,
     val artist: String,
     val thumbnailUrl: String?,
@@ -1125,17 +1236,78 @@ private fun albumEntries(
     )
 }
 
+/**
+ * In-memory cache for derived artist groupings and album entries.
+ * Prevents list state reset to index 0 on recompositions and drill-down navigation exits.
+ */
+internal object LocalMusicDerivedCache {
+    private var lastSongs: List<Song>? = null
+    private var lastCollections: List<DownloadedCollection>? = null
+    var cachedArtists: List<Map.Entry<String, List<Song>>> = emptyList()
+    var cachedAlbums: List<AlbumEntry> = emptyList()
+
+    var lastSongIndex = 0
+    var lastSongOffset = 0
+    var lastSongGridIndex = 0
+    var lastSongGridOffset = 0
+
+    var lastArtistIndex = 0
+    var lastArtistOffset = 0
+    var lastArtistGridIndex = 0
+    var lastArtistGridOffset = 0
+
+    var lastAlbumIndex = 0
+    var lastAlbumOffset = 0
+    var lastAlbumGridIndex = 0
+    var lastAlbumGridOffset = 0
+
+    fun resetScroll() {
+        lastSongIndex = 0
+        lastSongOffset = 0
+        lastSongGridIndex = 0
+        lastSongGridOffset = 0
+        lastArtistIndex = 0
+        lastArtistOffset = 0
+        lastArtistGridIndex = 0
+        lastArtistGridOffset = 0
+        lastAlbumIndex = 0
+        lastAlbumOffset = 0
+        lastAlbumGridIndex = 0
+        lastAlbumGridOffset = 0
+    }
+
+    fun getArtists(songs: List<Song>): List<Map.Entry<String, List<Song>>> {
+        if (songs === lastSongs && cachedArtists.isNotEmpty()) return cachedArtists
+        val result = groupSongsBySplitArtists(songs)
+            .entries
+            .sortedBy { it.key.lowercase(Locale.ROOT) }
+        cachedArtists = result
+        lastSongs = songs
+        return result
+    }
+
+    fun getAlbums(songs: List<Song>, collections: List<DownloadedCollection>): List<AlbumEntry> {
+        if (songs === lastSongs && collections === lastCollections && cachedAlbums.isNotEmpty()) return cachedAlbums
+        val result = albumEntries(songs, collections)
+        cachedAlbums = result
+        lastSongs = songs
+        lastCollections = collections
+        return result
+    }
+}
+
 @Composable
 private fun AlbumsTab(
     albums: List<AlbumEntry>,
     viewType: LibraryViewType,
+    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     selectedKeys: Set<String> = emptySet(),
     onAlbumClick: (AlbumEntry) -> Unit,
     onAlbumLongPress: ((AlbumEntry) -> Unit)?,
     contentPadding: PaddingValues,
 ) {
     if (viewType == LibraryViewType.GRID) {
-        val gridState = rememberLazyGridState()
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 140.dp),
             state = gridState,
@@ -1173,7 +1345,6 @@ private fun AlbumsTab(
             }
         }
     } else {
-        val listState = rememberLazyListState()
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -1714,6 +1885,7 @@ private fun DrillDownSongList(
     isArtist: Boolean = false,
     onOpenOnlineArtist: ((String) -> Unit)? = null,
     onOpenOnlineAlbum: ((String, String) -> Unit)? = null,
+    onOpenAlbum: ((AlbumEntry) -> Unit)? = null,
     viewType: LibraryViewType,
     selectedIds: Set<String> = emptySet(),
     currentSong: Song? = null,
@@ -1888,7 +2060,13 @@ private fun DrillDownSongList(
                         AlbumGridCard(
                             entry = entry,
                             selected = false,
-                            onClick = { albumDrillDown = entry },
+                            onClick = {
+                                if (onOpenAlbum != null) {
+                                    onOpenAlbum(entry)
+                                } else {
+                                    albumDrillDown = entry
+                                }
+                            },
                             onLongPress = {},
                         )
                     }

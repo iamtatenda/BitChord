@@ -120,6 +120,11 @@ enum class LocalMusicSort {
     TITLE_DESC,
     DATE_ADDED,
     DATE_MODIFIED,
+    MOST_PLAYED,
+    RECENTLY_PLAYED,
+    ARTIST_ASC,
+    DURATION_ASC,
+    DURATION_DESC,
 }
 
 /**
@@ -213,7 +218,7 @@ object AppSettings {
     val downloadOrganizeFolders = MutableStateFlow(false)
     val downloadSaveAlbumCover = MutableStateFlow(true)
     val downloadSaveTrackCover = MutableStateFlow(false)
-    val downloadCreateNomedia = MutableStateFlow(false)
+    val downloadCreateNomedia = MutableStateFlow(true)
     val downloadSaveLrcLyrics = MutableStateFlow(true)
 
     /** Whether the active network charges for data. `null` while offline. */
@@ -553,6 +558,15 @@ object AppSettings {
     /** Combines duplicate files and titles across multiple folders or storage volumes (Namida parity). */
     val preventDuplicateTracks = MutableStateFlow(true)
 
+    /** Automatically search and download missing album art online during background indexing. Default false to prevent unexpected network/disk activity. */
+    val autoDiscoverArtwork = MutableStateFlow(false)
+
+    /** Save downloaded album art directly to the album folder as cover.jpg for third-party players (Poweramp, Namida). Default false to protect phone gallery from being flooded with cover images. */
+    val saveAlbumCoverToFolder = MutableStateFlow(false)
+
+    /** Only display whole releases downloaded as albums/playlists in the Downloads Albums tab; prevents loose tracks from flooding the view. */
+    val noLocalAlbums = MutableStateFlow(true)
+
     val localMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val downloadedMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val localMusicViewType = MutableStateFlow(LibraryViewType.LIST)
@@ -798,7 +812,7 @@ object AppSettings {
         downloadOrganizeFolders.value = prefs.getBoolean(KEY_DOWNLOAD_ORGANIZE_FOLDERS, false)
         downloadSaveAlbumCover.value = prefs.getBoolean(KEY_DOWNLOAD_SAVE_ALBUM_COVER, true)
         downloadSaveTrackCover.value = prefs.getBoolean(KEY_DOWNLOAD_SAVE_TRACK_COVER, false)
-        downloadCreateNomedia.value = prefs.getBoolean(KEY_DOWNLOAD_CREATE_NOMEDIA, false)
+        downloadCreateNomedia.value = prefs.getBoolean(KEY_DOWNLOAD_CREATE_NOMEDIA, true)
         downloadSaveLrcLyrics.value = prefs.getBoolean(KEY_DOWNLOAD_SAVE_LRC_LYRICS, true)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
@@ -897,6 +911,9 @@ object AppSettings {
         replayGenres.value = prefs.getBoolean(KEY_REPLAY_GENRES, true)
         filterNonMusicAudio.value = prefs.getBoolean(KEY_FILTER_NON_MUSIC_AUDIO, true)
         preventDuplicateTracks.value = prefs.getBoolean(KEY_PREVENT_DUPLICATE_TRACKS, true)
+        autoDiscoverArtwork.value = prefs.getBoolean(KEY_AUTO_DISCOVER_ARTWORK, false)
+        saveAlbumCoverToFolder.value = prefs.getBoolean(KEY_SAVE_ALBUM_COVER_TO_FOLDER, false)
+        noLocalAlbums.value = prefs.getBoolean(KEY_NO_LOCAL_ALBUMS, true)
         localMusicSort.value = readLocalMusicSort(KEY_LOCAL_MUSIC_SORT)
         downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
         localMusicViewType.value = readLibraryViewType(KEY_LOCAL_MUSIC_VIEW_TYPE)
@@ -1694,6 +1711,21 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_PREVENT_DUPLICATE_TRACKS, value).apply()
     }
 
+    fun setAutoDiscoverArtwork(value: Boolean) {
+        autoDiscoverArtwork.value = value
+        prefs.edit().putBoolean(KEY_AUTO_DISCOVER_ARTWORK, value).apply()
+    }
+
+    fun setSaveAlbumCoverToFolder(value: Boolean) {
+        saveAlbumCoverToFolder.value = value
+        prefs.edit().putBoolean(KEY_SAVE_ALBUM_COVER_TO_FOLDER, value).apply()
+    }
+
+    fun setNoLocalAlbums(value: Boolean) {
+        noLocalAlbums.value = value
+        prefs.edit().putBoolean(KEY_NO_LOCAL_ALBUMS, value).apply()
+    }
+
     fun setLocalMusicSort(value: LocalMusicSort) {
         localMusicSort.value = value
         prefs.edit().putString(KEY_LOCAL_MUSIC_SORT, value.name).apply()
@@ -2054,6 +2086,9 @@ object AppSettings {
     private const val KEY_REPLAY_GENRES = "replay_genres"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_PREVENT_DUPLICATE_TRACKS = "prevent_duplicate_tracks"
+    private const val KEY_AUTO_DISCOVER_ARTWORK = "auto_discover_artwork"
+    private const val KEY_SAVE_ALBUM_COVER_TO_FOLDER = "save_album_cover_to_folder"
+    private const val KEY_NO_LOCAL_ALBUMS = "no_local_albums"
     private const val KEY_SHOW_CACHE_FOLDER = "show_cache_folder"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
     private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"

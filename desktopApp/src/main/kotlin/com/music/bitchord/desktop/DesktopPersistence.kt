@@ -108,7 +108,7 @@ class DesktopPersistence {
     fun downloadSaveLrc(): Boolean = boolean(KEY_DOWNLOAD_SAVE_LRC, false)
     fun setDownloadSaveLrc(value: Boolean) = saveBoolean(KEY_DOWNLOAD_SAVE_LRC, value)
 
-    fun downloadCreateNomedia(): Boolean = boolean(KEY_DOWNLOAD_CREATE_NOMEDIA, false)
+    fun downloadCreateNomedia(): Boolean = boolean(KEY_DOWNLOAD_CREATE_NOMEDIA, true)
     fun setDownloadCreateNomedia(value: Boolean) = saveBoolean(KEY_DOWNLOAD_CREATE_NOMEDIA, value)
 
     fun downloadArtistSeparator(): String = string(KEY_DOWNLOAD_ARTIST_SEPARATOR, ", ").ifBlank { ", " }

@@ -213,70 +213,100 @@ fun LocalMusicScreen(
 
     // Scroll states for each tab, hoisted and initialized from cache so scroll positions are never lost when navigating into drill-downs or detail pages
     val songsListState = rememberLazyListState(
-        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastSongIndex,
-        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastSongOffset,
+        initialFirstVisibleItemIndex = if (isDownloads) LocalMusicDerivedCache.lastDlSongIndex else LocalMusicDerivedCache.lastSongIndex,
+        initialFirstVisibleItemScrollOffset = if (isDownloads) LocalMusicDerivedCache.lastDlSongOffset else LocalMusicDerivedCache.lastSongOffset,
     )
     val songsGridState = rememberLazyGridState(
-        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastSongGridIndex,
-        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastSongGridOffset,
+        initialFirstVisibleItemIndex = if (isDownloads) LocalMusicDerivedCache.lastDlSongGridIndex else LocalMusicDerivedCache.lastSongGridIndex,
+        initialFirstVisibleItemScrollOffset = if (isDownloads) LocalMusicDerivedCache.lastDlSongGridOffset else LocalMusicDerivedCache.lastSongGridOffset,
     )
     val artistsListState = rememberLazyListState(
-        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastArtistIndex,
-        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastArtistOffset,
+        initialFirstVisibleItemIndex = if (isDownloads) LocalMusicDerivedCache.lastDlArtistIndex else LocalMusicDerivedCache.lastArtistIndex,
+        initialFirstVisibleItemScrollOffset = if (isDownloads) LocalMusicDerivedCache.lastDlArtistOffset else LocalMusicDerivedCache.lastArtistOffset,
     )
     val artistsGridState = rememberLazyGridState(
-        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastArtistGridIndex,
-        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastArtistGridOffset,
+        initialFirstVisibleItemIndex = if (isDownloads) LocalMusicDerivedCache.lastDlArtistGridIndex else LocalMusicDerivedCache.lastArtistGridIndex,
+        initialFirstVisibleItemScrollOffset = if (isDownloads) LocalMusicDerivedCache.lastDlArtistGridOffset else LocalMusicDerivedCache.lastArtistGridOffset,
     )
     val albumsListState = rememberLazyListState(
-        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastAlbumIndex,
-        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastAlbumOffset,
+        initialFirstVisibleItemIndex = if (isDownloads) LocalMusicDerivedCache.lastDlAlbumIndex else LocalMusicDerivedCache.lastAlbumIndex,
+        initialFirstVisibleItemScrollOffset = if (isDownloads) LocalMusicDerivedCache.lastDlAlbumOffset else LocalMusicDerivedCache.lastAlbumOffset,
     )
     val albumsGridState = rememberLazyGridState(
-        initialFirstVisibleItemIndex = LocalMusicDerivedCache.lastAlbumGridIndex,
-        initialFirstVisibleItemScrollOffset = LocalMusicDerivedCache.lastAlbumGridOffset,
+        initialFirstVisibleItemIndex = if (isDownloads) LocalMusicDerivedCache.lastDlAlbumGridIndex else LocalMusicDerivedCache.lastAlbumGridIndex,
+        initialFirstVisibleItemScrollOffset = if (isDownloads) LocalMusicDerivedCache.lastDlAlbumGridOffset else LocalMusicDerivedCache.lastAlbumGridOffset,
     )
 
     LaunchedEffect(songsListState) {
         snapshotFlow { songsListState.firstVisibleItemIndex to songsListState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                LocalMusicDerivedCache.lastSongIndex = index
-                LocalMusicDerivedCache.lastSongOffset = offset
+                if (isDownloads) {
+                    LocalMusicDerivedCache.lastDlSongIndex = index
+                    LocalMusicDerivedCache.lastDlSongOffset = offset
+                } else {
+                    LocalMusicDerivedCache.lastSongIndex = index
+                    LocalMusicDerivedCache.lastSongOffset = offset
+                }
             }
     }
     LaunchedEffect(songsGridState) {
         snapshotFlow { songsGridState.firstVisibleItemIndex to songsGridState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                LocalMusicDerivedCache.lastSongGridIndex = index
-                LocalMusicDerivedCache.lastSongGridOffset = offset
+                if (isDownloads) {
+                    LocalMusicDerivedCache.lastDlSongGridIndex = index
+                    LocalMusicDerivedCache.lastDlSongGridOffset = offset
+                } else {
+                    LocalMusicDerivedCache.lastSongGridIndex = index
+                    LocalMusicDerivedCache.lastSongGridOffset = offset
+                }
             }
     }
     LaunchedEffect(artistsListState) {
         snapshotFlow { artistsListState.firstVisibleItemIndex to artistsListState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                LocalMusicDerivedCache.lastArtistIndex = index
-                LocalMusicDerivedCache.lastArtistOffset = offset
+                if (isDownloads) {
+                    LocalMusicDerivedCache.lastDlArtistIndex = index
+                    LocalMusicDerivedCache.lastDlArtistOffset = offset
+                } else {
+                    LocalMusicDerivedCache.lastArtistIndex = index
+                    LocalMusicDerivedCache.lastArtistOffset = offset
+                }
             }
     }
     LaunchedEffect(artistsGridState) {
         snapshotFlow { artistsGridState.firstVisibleItemIndex to artistsGridState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                LocalMusicDerivedCache.lastArtistGridIndex = index
-                LocalMusicDerivedCache.lastArtistGridOffset = offset
+                if (isDownloads) {
+                    LocalMusicDerivedCache.lastDlArtistGridIndex = index
+                    LocalMusicDerivedCache.lastDlArtistGridOffset = offset
+                } else {
+                    LocalMusicDerivedCache.lastArtistGridIndex = index
+                    LocalMusicDerivedCache.lastArtistGridOffset = offset
+                }
             }
     }
     LaunchedEffect(albumsListState) {
         snapshotFlow { albumsListState.firstVisibleItemIndex to albumsListState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                LocalMusicDerivedCache.lastAlbumIndex = index
-                LocalMusicDerivedCache.lastAlbumOffset = offset
+                if (isDownloads) {
+                    LocalMusicDerivedCache.lastDlAlbumIndex = index
+                    LocalMusicDerivedCache.lastDlAlbumOffset = offset
+                } else {
+                    LocalMusicDerivedCache.lastAlbumIndex = index
+                    LocalMusicDerivedCache.lastAlbumOffset = offset
+                }
             }
     }
     LaunchedEffect(albumsGridState) {
         snapshotFlow { albumsGridState.firstVisibleItemIndex to albumsGridState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
-                LocalMusicDerivedCache.lastAlbumGridIndex = index
-                LocalMusicDerivedCache.lastAlbumGridOffset = offset
+                if (isDownloads) {
+                    LocalMusicDerivedCache.lastDlAlbumGridIndex = index
+                    LocalMusicDerivedCache.lastDlAlbumGridOffset = offset
+                } else {
+                    LocalMusicDerivedCache.lastAlbumGridIndex = index
+                    LocalMusicDerivedCache.lastAlbumGridOffset = offset
+                }
             }
     }
 
@@ -294,20 +324,12 @@ fun LocalMusicScreen(
     } else {
         AppSettings.localMusicViewType.collectAsStateWithLifecycle()
     }
+    val noLocalAlbums by AppSettings.noLocalAlbums.collectAsStateWithLifecycle()
 
+    var prevSortOrder by rememberSaveable { mutableStateOf<LocalMusicSort?>(null) }
     LaunchedEffect(sortOrder) {
-        LocalMusicDerivedCache.resetScroll()
-        songsListState.scrollToItem(0)
-        songsGridState.scrollToItem(0)
-        artistsListState.scrollToItem(0)
-        artistsGridState.scrollToItem(0)
-        albumsListState.scrollToItem(0)
-        albumsGridState.scrollToItem(0)
-    }
-
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotBlank()) {
-            LocalMusicDerivedCache.resetScroll()
+        if (prevSortOrder != null && prevSortOrder != sortOrder) {
+            LocalMusicDerivedCache.resetScroll(isDownloads)
             songsListState.scrollToItem(0)
             songsGridState.scrollToItem(0)
             artistsListState.scrollToItem(0)
@@ -315,6 +337,21 @@ fun LocalMusicScreen(
             albumsListState.scrollToItem(0)
             albumsGridState.scrollToItem(0)
         }
+        prevSortOrder = sortOrder
+    }
+
+    var prevSearchQuery by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(searchQuery) {
+        if (prevSearchQuery != searchQuery && searchQuery.isNotBlank()) {
+            LocalMusicDerivedCache.resetScroll(isDownloads)
+            songsListState.scrollToItem(0)
+            songsGridState.scrollToItem(0)
+            artistsListState.scrollToItem(0)
+            artistsGridState.scrollToItem(0)
+            albumsListState.scrollToItem(0)
+            albumsGridState.scrollToItem(0)
+        }
+        prevSearchQuery = searchQuery
     }
 
     var sortedSongs by remember(songs, sortOrder) {
@@ -347,18 +384,18 @@ fun LocalMusicScreen(
         }
     }
 
-    var artists by remember(sortedSongs, searchQuery) {
+    var artists by remember(sortedSongs, sortOrder, searchQuery) {
         mutableStateOf(
-            LocalMusicDerivedCache.getArtists(sortedSongs).let { list ->
+            LocalMusicDerivedCache.getArtists(sortedSongs, sortOrder).let { list ->
                 if (searchQuery.isBlank()) list
                 else list.filter { it.key.contains(searchQuery, ignoreCase = true) }
             }
         )
     }
-    LaunchedEffect(sortedSongs, searchQuery) {
+    LaunchedEffect(sortedSongs, sortOrder, searchQuery) {
         if (sortedSongs.size > 200) {
             val result = withContext(Dispatchers.Default) {
-                LocalMusicDerivedCache.getArtists(sortedSongs).let { list ->
+                LocalMusicDerivedCache.getArtists(sortedSongs, sortOrder).let { list ->
                     if (searchQuery.isBlank()) list
                     else list.filter { it.key.contains(searchQuery, ignoreCase = true) }
                 }
@@ -367,9 +404,9 @@ fun LocalMusicScreen(
         }
     }
 
-    var albums by remember(sortedSongs, collections, searchQuery) {
+    var albums by remember(sortedSongs, collections, sortOrder, searchQuery, noLocalAlbums) {
         mutableStateOf(
-            LocalMusicDerivedCache.getAlbums(sortedSongs, collections).let { list ->
+            LocalMusicDerivedCache.getAlbums(sortedSongs, collections, sortOrder, isDownloads = isDownloads, noLocalAlbums = noLocalAlbums).let { list ->
                 if (searchQuery.isBlank()) list
                 else list.filter {
                     it.title.contains(searchQuery, ignoreCase = true) ||
@@ -378,10 +415,10 @@ fun LocalMusicScreen(
             }
         )
     }
-    LaunchedEffect(sortedSongs, collections, searchQuery) {
+    LaunchedEffect(sortedSongs, collections, sortOrder, searchQuery, noLocalAlbums) {
         if (sortedSongs.size > 200) {
             val result = withContext(Dispatchers.Default) {
-                LocalMusicDerivedCache.getAlbums(sortedSongs, collections).let { list ->
+                LocalMusicDerivedCache.getAlbums(sortedSongs, collections, sortOrder, isDownloads = isDownloads, noLocalAlbums = noLocalAlbums).let { list ->
                     if (searchQuery.isBlank()) list
                     else list.filter {
                         it.title.contains(searchQuery, ignoreCase = true) ||
@@ -1207,6 +1244,8 @@ class AlbumEntry(
 private fun albumEntries(
     songs: List<Song>,
     collections: List<DownloadedCollection>,
+    isDownloads: Boolean = false,
+    noLocalAlbums: Boolean = true,
 ): List<AlbumEntry> {
     val asked = collections.map { collection ->
         AlbumEntry(
@@ -1219,6 +1258,13 @@ private fun albumEntries(
             songs = collection.songs,
             asked = true,
             key = "asked:${collection.id}",
+        )
+    }
+    // In Downloads, when noLocalAlbums is turned on (default), hide loose singles and only
+    // display whole releases that were explicitly downloaded as albums/playlists.
+    if (isDownloads && noLocalAlbums) {
+        return asked.sortedWith(
+            compareByDescending<AlbumEntry> { it.asked }.thenBy { it.title.lowercase(Locale.ROOT) },
         )
     }
     val claimed = asked.mapTo(HashSet()) { it.title.lowercase(Locale.ROOT) }
@@ -1251,9 +1297,14 @@ private fun albumEntries(
 internal object LocalMusicDerivedCache {
     private var lastSongs: List<Song>? = null
     private var lastCollections: List<DownloadedCollection>? = null
+    private var lastArtistSort: LocalMusicSort? = null
+    private var lastAlbumSort: LocalMusicSort? = null
+    private var lastIsDownloads: Boolean? = null
+    private var lastNoLocalAlbums: Boolean? = null
     var cachedArtists: List<Map.Entry<String, List<Song>>> = emptyList()
     var cachedAlbums: List<AlbumEntry> = emptyList()
 
+    // Local Music scroll positions
     var lastSongIndex = 0
     var lastSongOffset = 0
     var lastSongGridIndex = 0
@@ -1269,37 +1320,110 @@ internal object LocalMusicDerivedCache {
     var lastAlbumGridIndex = 0
     var lastAlbumGridOffset = 0
 
-    fun resetScroll() {
-        lastSongIndex = 0
-        lastSongOffset = 0
-        lastSongGridIndex = 0
-        lastSongGridOffset = 0
-        lastArtistIndex = 0
-        lastArtistOffset = 0
-        lastArtistGridIndex = 0
-        lastArtistGridOffset = 0
-        lastAlbumIndex = 0
-        lastAlbumOffset = 0
-        lastAlbumGridIndex = 0
-        lastAlbumGridOffset = 0
+    // Downloads folder scroll positions
+    var lastDlSongIndex = 0
+    var lastDlSongOffset = 0
+    var lastDlSongGridIndex = 0
+    var lastDlSongGridOffset = 0
+
+    var lastDlArtistIndex = 0
+    var lastDlArtistOffset = 0
+    var lastDlArtistGridIndex = 0
+    var lastDlArtistGridOffset = 0
+
+    var lastDlAlbumIndex = 0
+    var lastDlAlbumOffset = 0
+    var lastDlAlbumGridIndex = 0
+    var lastDlAlbumGridOffset = 0
+
+    fun resetScroll(isDownloads: Boolean = false) {
+        if (isDownloads) {
+            lastDlSongIndex = 0
+            lastDlSongOffset = 0
+            lastDlSongGridIndex = 0
+            lastDlSongGridOffset = 0
+            lastDlArtistIndex = 0
+            lastDlArtistOffset = 0
+            lastDlArtistGridIndex = 0
+            lastDlArtistGridOffset = 0
+            lastDlAlbumIndex = 0
+            lastDlAlbumOffset = 0
+            lastDlAlbumGridIndex = 0
+            lastDlAlbumGridOffset = 0
+        } else {
+            lastSongIndex = 0
+            lastSongOffset = 0
+            lastSongGridIndex = 0
+            lastSongGridOffset = 0
+            lastArtistIndex = 0
+            lastArtistOffset = 0
+            lastArtistGridIndex = 0
+            lastArtistGridOffset = 0
+            lastAlbumIndex = 0
+            lastAlbumOffset = 0
+            lastAlbumGridIndex = 0
+            lastAlbumGridOffset = 0
+        }
     }
 
-    fun getArtists(songs: List<Song>): List<Map.Entry<String, List<Song>>> {
-        if (songs === lastSongs && cachedArtists.isNotEmpty()) return cachedArtists
-        val result = groupSongsBySplitArtists(songs)
-            .entries
-            .sortedBy { it.key.lowercase(Locale.ROOT) }
+    fun getArtists(songs: List<Song>, sort: LocalMusicSort = LocalMusicSort.TITLE_ASC): List<Map.Entry<String, List<Song>>> {
+        val sameSongs = songs === lastSongs || (
+            cachedArtists.isNotEmpty() &&
+            songs.size == lastSongs?.size &&
+            songs.firstOrNull()?.videoId == lastSongs?.firstOrNull()?.videoId &&
+            songs.lastOrNull()?.videoId == lastSongs?.lastOrNull()?.videoId
+        )
+        if (sameSongs && sort == lastArtistSort && cachedArtists.isNotEmpty()) return cachedArtists
+        val grouped = groupSongsBySplitArtists(songs)
+        val result = when (sort) {
+            LocalMusicSort.TITLE_DESC -> grouped.entries.sortedByDescending { it.key.lowercase(Locale.ROOT) }
+            LocalMusicSort.MOST_PLAYED, LocalMusicSort.DURATION_DESC -> grouped.entries.sortedByDescending { it.value.size }
+            LocalMusicSort.DURATION_ASC -> grouped.entries.sortedBy { it.value.size }
+            LocalMusicSort.DATE_ADDED -> grouped.entries.sortedByDescending { entry ->
+                entry.value.maxOfOrNull { it.localDateAddedSeconds ?: Long.MIN_VALUE } ?: Long.MIN_VALUE
+            }
+            LocalMusicSort.DATE_MODIFIED -> grouped.entries.sortedByDescending { entry ->
+                entry.value.maxOfOrNull { it.localDateModifiedSeconds ?: Long.MIN_VALUE } ?: Long.MIN_VALUE
+            }
+            else -> grouped.entries.sortedBy { it.key.lowercase(Locale.ROOT) }
+        }
         cachedArtists = result
         lastSongs = songs
+        lastArtistSort = sort
         return result
     }
 
-    fun getAlbums(songs: List<Song>, collections: List<DownloadedCollection>): List<AlbumEntry> {
-        if (songs === lastSongs && collections === lastCollections && cachedAlbums.isNotEmpty()) return cachedAlbums
-        val result = albumEntries(songs, collections)
+    fun getAlbums(
+        songs: List<Song>,
+        collections: List<DownloadedCollection>,
+        sort: LocalMusicSort = LocalMusicSort.TITLE_ASC,
+        isDownloads: Boolean = false,
+        noLocalAlbums: Boolean = true,
+    ): List<AlbumEntry> {
+        val sameSongs = (songs === lastSongs && collections === lastCollections) || (
+            cachedAlbums.isNotEmpty() &&
+            songs.size == lastSongs?.size &&
+            collections.size == lastCollections?.size &&
+            songs.firstOrNull()?.videoId == lastSongs?.firstOrNull()?.videoId &&
+            songs.lastOrNull()?.videoId == lastSongs?.lastOrNull()?.videoId
+        )
+        if (sameSongs && sort == lastAlbumSort && isDownloads == lastIsDownloads && noLocalAlbums == lastNoLocalAlbums && cachedAlbums.isNotEmpty()) return cachedAlbums
+        val base = albumEntries(songs, collections, isDownloads = isDownloads, noLocalAlbums = noLocalAlbums)
+        val result = when (sort) {
+            LocalMusicSort.TITLE_DESC -> base.sortedWith(compareByDescending { it.title.lowercase(Locale.ROOT) })
+            LocalMusicSort.DATE_ADDED -> base.sortedWith(compareByDescending { it.songs.maxOfOrNull { s -> s.localDateAddedSeconds ?: Long.MIN_VALUE } ?: Long.MIN_VALUE })
+            LocalMusicSort.DATE_MODIFIED -> base.sortedWith(compareByDescending { it.songs.maxOfOrNull { s -> s.localDateModifiedSeconds ?: Long.MIN_VALUE } ?: Long.MIN_VALUE })
+            LocalMusicSort.MOST_PLAYED, LocalMusicSort.DURATION_DESC -> base.sortedWith(compareByDescending { it.songs.size })
+            LocalMusicSort.DURATION_ASC -> base.sortedWith(compareBy { it.songs.size })
+            LocalMusicSort.ARTIST_ASC -> base.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+            else -> base.sortedWith(compareByDescending<AlbumEntry> { it.asked }.thenBy { it.title.lowercase(Locale.ROOT) })
+        }
         cachedAlbums = result
         lastSongs = songs
         lastCollections = collections
+        lastAlbumSort = sort
+        lastIsDownloads = isDownloads
+        lastNoLocalAlbums = noLocalAlbums
         return result
     }
 }
@@ -2187,6 +2311,32 @@ private fun List<Song>.sortedForLibrary(order: LocalMusicSort): List<Song> = whe
         compareByDescending<Song> { it.localDateModifiedSeconds ?: Long.MIN_VALUE }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
     )
+    LocalMusicSort.MOST_PLAYED -> {
+        val playCounts = com.music.bitchord.data.stats.ListeningStats.allTrackPlayCounts()
+        sortedWith(
+            compareByDescending<Song> { playCounts[it.videoId] ?: 0 }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+        )
+    }
+    LocalMusicSort.RECENTLY_PLAYED -> {
+        val lastPlayed = com.music.bitchord.data.stats.ListeningStats.allTrackLastPlayed()
+        sortedWith(
+            compareByDescending<Song> { lastPlayed[it.videoId] ?: 0L }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+        )
+    }
+    LocalMusicSort.ARTIST_ASC -> sortedWith(
+        compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+    )
+    LocalMusicSort.DURATION_ASC -> sortedWith(
+        compareBy<Song> { it.durationSeconds ?: 0 }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+    )
+    LocalMusicSort.DURATION_DESC -> sortedWith(
+        compareByDescending<Song> { it.durationSeconds ?: 0 }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+    )
 }
 
 /**
@@ -2351,6 +2501,11 @@ private fun LocalMusicSort.localizedLabel(): String = when (this) {
     LocalMusicSort.TITLE_DESC -> stringResource(R.string.sort_title_descending)
     LocalMusicSort.DATE_ADDED -> stringResource(R.string.sort_date_added)
     LocalMusicSort.DATE_MODIFIED -> stringResource(R.string.sort_date_modified)
+    LocalMusicSort.MOST_PLAYED -> stringResource(R.string.sort_most_played)
+    LocalMusicSort.RECENTLY_PLAYED -> stringResource(R.string.sort_recently_played)
+    LocalMusicSort.ARTIST_ASC -> stringResource(R.string.sort_artist_name)
+    LocalMusicSort.DURATION_ASC -> stringResource(R.string.sort_duration_shortest)
+    LocalMusicSort.DURATION_DESC -> stringResource(R.string.sort_duration_longest)
 }
 
 /** The Downloads-only replacement for the usual search and sort controls. */

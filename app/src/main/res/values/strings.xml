@@ -770,6 +770,17 @@
     <string name="sort_date_added_oldest">Date added (oldest first)</string>
     <string name="sort_date_added_toggle">Date added</string>
     <string name="sort_date_modified">Date modified (newest first)</string>
+    <string name="sort_most_played">Most played</string>
+    <string name="sort_recently_played">Recently played</string>
+    <string name="sort_artist_name">Artist (A to Z)</string>
+    <string name="sort_duration_shortest">Duration (shortest first)</string>
+    <string name="sort_duration_longest">Duration (longest first)</string>
+    <string name="auto_discover_artwork">Auto-download missing album artwork</string>
+    <string name="auto_discover_artwork_subtitle">Search online for high-res album covers when indexing local tracks</string>
+    <string name="save_cover_to_folder">Save cover.jpg to album folders</string>
+    <string name="save_cover_to_folder_subtitle">Export album covers directly into music folders for external players (Poweramp, Namida)</string>
+    <string name="no_local_albums_setting_title">Only show complete downloaded albums</string>
+    <string name="no_local_albums_setting_subtitle">Prevent loose individual songs from flooding the Albums tab with single-track albums</string>
     <string name="sort_default">Default order</string>
     <string name="sort_library">Sort</string>
     <string name="sort_songs">Sort songs</string>

@@ -131,21 +131,31 @@ object LocalMediaRepository {
     }
 
     /**
-     * Updates songs in memory and disk cache with resolved artwork URLs.
+     * Updates songs in memory and disk cache with resolved artwork URLs,
+     * and emits the new list into [liveDiscoveredSongs] so the UI recomposes
+     * immediately — without this the artwork would vanish on the next navigation
+     * because the StateFlow held the pre-artwork version.
      */
     fun updateSongsArtwork(context: Context, updated: Map<String, String>) {
         if (updated.isEmpty()) return
         val current = cachedSongsMemory ?: getCachedLocalMusic(context)
         if (current.isEmpty()) return
+        var changed = false
         val newSongs = current.map { song ->
             val newArt = updated[song.videoId] ?: updated[song.localUri]
             if (newArt != null && newArt != song.thumbnailUrl) {
+                changed = true
                 song.copy(thumbnailUrl = newArt)
             } else {
                 song
             }
         }
+        if (!changed) return
         saveCachedLocalMusic(context, newSongs)
+        // Push into the live flow so Compose sees the new artwork without
+        // requiring a full re-index. Only emit when something actually changed
+        // to avoid the list-reference churn that reset scroll positions.
+        liveDiscoveredSongs.value = newSongs
     }
 
     /**
@@ -154,6 +164,7 @@ object LocalMediaRepository {
      * and persists discovered artwork to the local library cache.
      */
     suspend fun enrichLibraryArtwork(context: Context, songs: List<Song>) = withContext(Dispatchers.IO) {
+        if (!com.music.bitchord.data.settings.AppSettings.autoDiscoverArtwork.value) return@withContext
         val missingArt = songs.filter { s ->
             val t = s.thumbnailUrl
             t.isNullOrBlank() || t.startsWith("audio:")
@@ -178,7 +189,9 @@ object LocalMediaRepository {
             }
 
             if (foundArt != null) {
-                OnlineArtworkRepository.saveCoverToAlbumFolder(context, albumTracks, foundArt)
+                if (com.music.bitchord.data.settings.AppSettings.saveAlbumCoverToFolder.value) {
+                    OnlineArtworkRepository.saveCoverToAlbumFolder(context, albumTracks, foundArt)
+                }
                 for (track in albumTracks) {
                     updates[track.videoId] = foundArt
                     track.localUri?.let { updates[it] = foundArt }

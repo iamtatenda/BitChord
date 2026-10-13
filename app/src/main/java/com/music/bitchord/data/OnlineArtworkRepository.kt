@@ -1,7 +1,6 @@
 package com.music.bitchord.data
 
 import android.content.Context
-import android.media.MediaScannerConnection
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
@@ -289,12 +288,20 @@ object OnlineArtworkRepository {
                 if (!resp.isSuccessful) return@runCatching false
                 val bytes = resp.body?.bytes() ?: return@runCatching false
                 coverFile.writeBytes(bytes)
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(coverFile.absolutePath),
-                    arrayOf("image/jpeg"),
-                    null,
-                )
+                if (com.music.bitchord.data.settings.AppSettings.downloadCreateNomedia.value ||
+                    com.music.bitchord.data.settings.AppSettings.noLocalAlbums.value
+                ) {
+                    val nomedia = File(folder, ".nomedia")
+                    if (!nomedia.exists()) {
+                        runCatching { nomedia.createNewFile() }
+                    }
+                }
+                // Do NOT call MediaScannerConnection.scanFile with "image/jpeg" here.
+                // Doing so would index cover.jpg into the Android gallery/Photos app,
+                // flooding the user's photo library with hundreds of album cover images.
+                // Third-party music players (Poweramp, Namida, Samsung Music, VLC)
+                // discover cover.jpg autonomously through their own folder scans and
+                // do NOT require a MediaStore entry for folder artwork to work.
                 true
             }
         }.getOrDefault(false)

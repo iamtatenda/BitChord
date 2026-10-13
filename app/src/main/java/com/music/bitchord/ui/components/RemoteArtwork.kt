@@ -7,9 +7,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.OnlineArtworkRepository
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.remote.RemoteArtworkStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * A drawable art URL for [song]: its own thumbnail when it has one, else the
@@ -53,8 +56,20 @@ fun rememberRemoteArtworkUrl(song: Song?): String? {
                 // Only replace if we found something — never downgrade.
                 if (found != null) {
                     resolved = found
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        OnlineArtworkRepository.saveCoverToAlbumFolder(context, song, found)
+                    withContext(Dispatchers.IO) {
+                        // Persist the URL into the library cache so it survives
+                        // navigation (back-press recomposes with the old StateFlow
+                        // value otherwise, making the artwork "forget" itself).
+                        val updates = buildMap {
+                            put(song.videoId, found)
+                            song.localUri?.let { put(it, found) }
+                            song.localPath?.let { put(it, found) }
+                        }
+                        LocalMediaRepository.updateSongsArtwork(context, updates)
+                        // Also save as cover.jpg for Poweramp / Namida / Samsung Music if user opted in.
+                        if (com.music.bitchord.data.settings.AppSettings.saveAlbumCoverToFolder.value) {
+                            OnlineArtworkRepository.saveCoverToAlbumFolder(context, song, found)
+                        }
                     }
                 }
             }

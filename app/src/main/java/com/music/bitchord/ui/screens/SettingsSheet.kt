@@ -237,6 +237,9 @@ fun SettingsScreen(
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val preventDuplicateTracks by AppSettings.preventDuplicateTracks.collectAsStateWithLifecycle()
+    val autoDiscoverArtwork by AppSettings.autoDiscoverArtwork.collectAsStateWithLifecycle()
+    val saveAlbumCoverToFolder by AppSettings.saveAlbumCoverToFolder.collectAsStateWithLifecycle()
+    val noLocalAlbums by AppSettings.noLocalAlbums.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
     val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
@@ -1144,6 +1147,63 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setPreventDuplicateTracks(!preventDuplicateTracks) },
+                )
+            }
+            val autoDiscoverTitle = stringResource(R.string.auto_discover_artwork)
+            row(autoDiscoverTitle, "artwork", "album art", "cover", "download art") {
+                SettingsRow(
+                    icon = Icons.Rounded.Album,
+                    title = autoDiscoverTitle,
+                    subtitle = stringResource(R.string.auto_discover_artwork_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = autoDiscoverArtwork,
+                            onCheckedChange = AppSettings::setAutoDiscoverArtwork,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setAutoDiscoverArtwork(!autoDiscoverArtwork) },
+                )
+            }
+            val saveCoverFolderTitle = stringResource(R.string.save_cover_to_folder)
+            row(saveCoverFolderTitle, "cover", "album art", "poweramp", "namida", "cover.jpg") {
+                SettingsRow(
+                    icon = Icons.Rounded.Folder,
+                    title = saveCoverFolderTitle,
+                    subtitle = stringResource(R.string.save_cover_to_folder_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = saveAlbumCoverToFolder,
+                            onCheckedChange = AppSettings::setSaveAlbumCoverToFolder,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setSaveAlbumCoverToFolder(!saveAlbumCoverToFolder) },
+                )
+            }
+            val noLocalAlbumsTitle = stringResource(R.string.no_local_albums_setting_title)
+            row(noLocalAlbumsTitle, "albums", "loose", "singles", "downloads", "no local albums") {
+                SettingsRow(
+                    icon = Icons.Rounded.Album,
+                    title = noLocalAlbumsTitle,
+                    subtitle = stringResource(R.string.no_local_albums_setting_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = noLocalAlbums,
+                            onCheckedChange = AppSettings::setNoLocalAlbums,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setNoLocalAlbums(!noLocalAlbums) },
                 )
             }
         }
@@ -2200,6 +2260,7 @@ private fun DownloadOptionsSheet() {
     val saveAlbumCover by AppSettings.downloadSaveAlbumCover.collectAsStateWithLifecycle()
     val saveTrackCover by AppSettings.downloadSaveTrackCover.collectAsStateWithLifecycle()
     val createNomedia by AppSettings.downloadCreateNomedia.collectAsStateWithLifecycle()
+    val noLocalAlbums by AppSettings.noLocalAlbums.collectAsStateWithLifecycle()
     val saveLrcLyrics by AppSettings.downloadSaveLrcLyrics.collectAsStateWithLifecycle()
     val artistSeparator by AppSettings.downloadArtistSeparator.collectAsStateWithLifecycle()
 
@@ -2317,6 +2378,25 @@ private fun DownloadOptionsSheet() {
                             )
                         },
                         onClick = { AppSettings.setDownloadCreateNomedia(!createNomedia) },
+                    )
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.Album,
+                        title = stringResource(R.string.no_local_albums_setting_title),
+                        subtitle = stringResource(R.string.no_local_albums_setting_subtitle),
+                        trailing = {
+                            Switch(
+                                checked = noLocalAlbums,
+                                onCheckedChange = AppSettings::setNoLocalAlbums,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setNoLocalAlbums(!noLocalAlbums) },
                     )
                 }
 

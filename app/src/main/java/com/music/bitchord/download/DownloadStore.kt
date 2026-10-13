@@ -573,7 +573,7 @@ object DownloadStore {
             }.getOrDefault(false)
 
             if (written) {
-                if (!fileName.startsWith(".")) {
+                if (!fileName.startsWith(".") && fileName != "cover.jpg") {
                     MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
                 }
                 return

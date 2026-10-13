@@ -1415,7 +1415,7 @@ internal object LocalMusicDerivedCache {
             LocalMusicSort.DATE_MODIFIED -> base.sortedWith(compareByDescending { it.songs.maxOfOrNull { s -> s.localDateModifiedSeconds ?: Long.MIN_VALUE } ?: Long.MIN_VALUE })
             LocalMusicSort.MOST_PLAYED, LocalMusicSort.DURATION_DESC -> base.sortedWith(compareByDescending { it.songs.size })
             LocalMusicSort.DURATION_ASC -> base.sortedWith(compareBy { it.songs.size })
-            LocalMusicSort.ARTIST_ASC -> base.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+            LocalMusicSort.ARTIST_ASC -> base.sortedWith(compareBy<AlbumEntry> { it.artist.lowercase(Locale.ROOT) }.thenBy { it.title.lowercase(Locale.ROOT) })
             else -> base.sortedWith(compareByDescending<AlbumEntry> { it.asked }.thenBy { it.title.lowercase(Locale.ROOT) })
         }
         cachedAlbums = result
@@ -2326,8 +2326,8 @@ private fun List<Song>.sortedForLibrary(order: LocalMusicSort): List<Song> = whe
         )
     }
     LocalMusicSort.ARTIST_ASC -> sortedWith(
-        compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist }
-            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+        compareBy<Song> { it.artist.lowercase(Locale.ROOT) }
+            .thenBy { it.title.lowercase(Locale.ROOT) },
     )
     LocalMusicSort.DURATION_ASC -> sortedWith(
         compareBy<Song> { it.durationSeconds ?: 0 }

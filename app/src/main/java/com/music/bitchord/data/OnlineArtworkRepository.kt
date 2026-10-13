@@ -263,7 +263,7 @@ object OnlineArtworkRepository {
 
     private suspend fun fetchYtMusicSongArt(query: String): String? = runCatching {
         YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()
-            ?.filterIsInstance<SearchResult.Song>()
+            ?.filterIsInstance<SearchResult.Track>()
             ?.firstOrNull()
             ?.song
             ?.thumbnailUrl

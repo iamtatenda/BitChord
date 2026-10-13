@@ -1175,11 +1175,11 @@ class AlbumEntry(
     val artist: String,
     val thumbnailUrl: String?,
     /** Billed as a playlist rather than by artist; see [AlbumRow]. */
-    val playlist: Boolean,
+    val playlist: Boolean = false,
     /** Kept in the order it was downloaded in, which is the release's own. */
     val songs: List<Song>,
     /** Whether this is a release the user asked for, or a grouping inferred. */
-    val asked: Boolean,
+    val asked: Boolean = false,
     /**
      * What the list keys this row by — the release's own id where it has one.
      *

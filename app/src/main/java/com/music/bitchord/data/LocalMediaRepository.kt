@@ -17,6 +17,7 @@ import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow

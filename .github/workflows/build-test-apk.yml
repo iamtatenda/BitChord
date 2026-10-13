@@ -117,7 +117,7 @@ jobs:
 
   build-windows:
     name: Build Windows App
-    runs-on: windows-2022
+    runs-on: windows-latest
     needs: [build-apk]
     continue-on-error: true
     steps:
@@ -133,9 +133,10 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: WiX Toolset 3
+      - name: WiX Toolset 3 & MinGW Toolchain
         shell: pwsh
         run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           $url = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
           Invoke-WebRequest -Uri $url -OutFile wix.zip
           Expand-Archive wix.zip -DestinationPath "$env:RUNNER_TEMP\wix"
@@ -148,9 +149,9 @@ jobs:
           echo "LASTFM_SECRET=${{ secrets.LASTFM_SECRET }}" >> local.properties
 
       - name: Build Windows Setup EXE
-        shell: bash
+        shell: pwsh
         run: |
-          ./gradlew :desktopApp:packageExe "-Pbitchord.version=1.8.0-test"
+          .\gradlew.bat :desktopApp:packageExe "-Pbitchord.version=1.8.0-test"
 
       - name: Prepare Windows Executable
         shell: pwsh

@@ -68,7 +68,9 @@ object PlaybackTracker {
      * being made — the guard is here rather than at the call site because this
      * object is the thing that knows what an id has to look like to be useful.
      */
-    private val VIDEO_ID = Regex("""[A-Za-z0-9_-]{11}""")
+    val VIDEO_ID = Regex("""[A-Za-z0-9_-]{11}""")
+
+    fun isEligibleVideoId(id: String): Boolean = VIDEO_ID.matches(id)
 
     private class Session(
         val videoId: String,

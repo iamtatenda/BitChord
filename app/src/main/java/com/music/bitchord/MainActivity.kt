@@ -1268,7 +1268,19 @@ private fun BitChordApp(
         // never will); those can't be queued, so play the rest in their order.
         if (allSongs.getOrNull(allIndex)?.isUnresolvedSpotify == true) return@playFrom
         val songs = allSongs.filterNot { it.isUnresolvedSpotify }
-        val index = songs.indexOf(allSongs.getOrNull(allIndex)).coerceAtLeast(0)
+        val rawIndex = songs.indexOf(allSongs.getOrNull(allIndex)).coerceAtLeast(0)
+        // If the context is massive (like an 8,000+ local music library), window it
+        // around the tapped song so ExoPlayer and Binder transactions stay lightweight
+        // without dropping audio responsiveness.
+        val (contextSongs, index) = if (songs.size > 200) {
+            val preceding = 50
+            val following = 150
+            val start = (rawIndex - preceding).coerceAtLeast(0)
+            val end = (rawIndex + following).coerceAtMost(songs.size)
+            songs.subList(start, end) to (rawIndex - start)
+        } else {
+            songs to rawIndex
+        }
         playRequestGeneration++
         activeRadioSeed = null
         scope.launch {
@@ -1279,7 +1291,7 @@ private fun BitChordApp(
             val currentIndex = c.currentMediaItemIndex
 
             if (ListenTogether.state.value.inParty) {
-                val selectedSong = songs.getOrNull(index) ?: return@launch
+                val selectedSong = contextSongs.getOrNull(index) ?: return@launch
                 val party = ListenTogether.state.value
                 val partyQueue = party.queue.items
                 val partyIndex = partyQueueIndexOf(party.queue, party.playback, party.playback.track?.videoId)
@@ -1298,7 +1310,7 @@ private fun BitChordApp(
                 val result = QueueCoordinator.buildContextQueue(
                     currentTimeline = currentTimeline,
                     currentIndex = currentIndex,
-                    newContextSongs = songs,
+                    newContextSongs = contextSongs,
                     selectedIndex = index,
                     contextSource = source,
                 )
@@ -2884,9 +2896,10 @@ private fun BitChordApp(
                             onSongSwipe = onSongSwipe,
                             onShuffle = { songs ->
                                 QueueShuffle.enableForNextQueue()
+                                val playList = if (songs.size > 200) songs.shuffled().take(200) else songs
                                 playFrom(
-                                    songs,
-                                    songs.indices.random(),
+                                    playList,
+                                    playList.indices.random(),
                                     QueueSource(page.title, PlaybackSourceType.BROWSE, page.browseId),
                                 )
                             },

@@ -77,6 +77,7 @@ object LocalMediaRepository {
 
     val isIndexing = MutableStateFlow(false)
     val indexedCount = MutableStateFlow(0)
+    val liveDiscoveredSongs = MutableStateFlow<List<Song>>(emptyList())
 
     @Volatile
     private var cachedSongsMemory: List<Song>? = null
@@ -311,8 +312,15 @@ object LocalMediaRepository {
 
         isIndexing.value = true
         indexedCount.value = 0
+        liveDiscoveredSongs.value = emptyList()
         try {
             val songs = mutableListOf<Song>()
+            fun notifyProgress(force: Boolean = false) {
+                indexedCount.value = songs.size
+                if (force || songs.size - liveDiscoveredSongs.value.size >= 50) {
+                    liveDiscoveredSongs.value = songs.toList()
+                }
+            }
         // This scan runs over every audio file on the device, which includes
         // whatever this app has downloaded into Music/BitChord alongside
         // everything else — but by content URI, the only thing MediaStore
@@ -456,7 +464,7 @@ object LocalMediaRepository {
                     }
                 }
             }.onFailure { Log.w(TAG, "Failed scanning volume $volumeUri: ${it.message}") }
-            indexedCount.value = songs.size
+            notifyProgress(force = true)
         }
 
         // Also query MediaStore.Files across all volumes to catch audio files that
@@ -638,7 +646,7 @@ object LocalMediaRepository {
                     }
                 }
             }.onFailure { Log.w(TAG, "Direct folder scan failed for ${folder.path}: ${it.message}") }
-            indexedCount.value = songs.size
+            notifyProgress(force = true)
         }
 
         // Also if SAF tree URI is configured, walk using fast DocumentsContract queries
@@ -712,13 +720,15 @@ object LocalMediaRepository {
                 }
 
                 scanSafFast(rootDocId, 15, null)
-                indexedCount.value = songs.size
+                notifyProgress(force = true)
             }.onFailure { Log.w(TAG, "Fast SAF tree scan failed: ${it.message}") }
         }
 
+        notifyProgress(force = true)
         val deduplicated = deduplicateTracks(songs, AppSettings.preventDuplicateTracks.value)
         saveCachedLocalMusic(context, deduplicated)
         indexedCount.value = deduplicated.size
+        liveDiscoveredSongs.value = deduplicated
         deduplicated
     } finally {
         isIndexing.value = false

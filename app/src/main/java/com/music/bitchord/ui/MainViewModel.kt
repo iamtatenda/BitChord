@@ -1419,6 +1419,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
+            LocalMediaRepository.liveDiscoveredSongs.collect { batch ->
+                if (batch.isNotEmpty()) {
+                    val state = UiState.Success(batch)
+                    _librarySongs.value = state
+                    _detailStack.value = _detailStack.value.map { page ->
+                        if (page.browseId == "local:all") page.copy(songs = state) else page
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
             // Emptied from Settings while the folder sits open underneath.
             AudioCache.contentsChanged.drop(1).collect {
                 if (_detailStack.value.any { page -> page.browseId == CACHE_FOLDER_BROWSE_ID }) {
@@ -1978,7 +1989,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (cached.isNotEmpty()) {
                     _librarySongs.value = UiState.Success(cached)
                 } else {
-                    runCatching { LocalMediaRepository.scanAndCacheLocalMusic(context) }.fold(
+                    _librarySongs.value = runCatching { LocalMediaRepository.scanAndCacheLocalMusic(context) }.fold(
                         onSuccess = { songs ->
                             if (songs.isEmpty()) UiState.Error(text(R.string.no_local_audio_found))
                             else UiState.Success(songs)

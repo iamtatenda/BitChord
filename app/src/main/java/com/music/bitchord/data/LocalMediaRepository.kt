@@ -46,6 +46,8 @@ internal data class CachedLocalSong(
     val localPath: String? = null,
     val localDateAddedSeconds: Long? = null,
     val localDateModifiedSeconds: Long? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null,
 ) {
     fun toSong(): Song = Song(
         videoId = videoId,
@@ -58,6 +60,8 @@ internal data class CachedLocalSong(
         localPath = localPath,
         localDateAddedSeconds = localDateAddedSeconds,
         localDateModifiedSeconds = localDateModifiedSeconds,
+        discNumber = discNumber,
+        trackNumber = trackNumber,
     )
 
     companion object {
@@ -72,6 +76,8 @@ internal data class CachedLocalSong(
             localPath = s.localPath,
             localDateAddedSeconds = s.localDateAddedSeconds,
             localDateModifiedSeconds = s.localDateModifiedSeconds,
+            discNumber = s.discNumber,
+            trackNumber = s.trackNumber,
         )
     }
 }
@@ -481,7 +487,7 @@ object LocalMediaRepository {
             val songs = mutableListOf<Song>()
             fun notifyProgress(force: Boolean = false) {
                 indexedCount.value = songs.size
-                if (force || songs.size - liveDiscoveredSongs.value.size >= 50) {
+                if (force || songs.size - liveDiscoveredSongs.value.size >= 25) {
                     liveDiscoveredSongs.value = songs.toList()
                 }
             }
@@ -506,9 +512,13 @@ object LocalMediaRepository {
             MediaStore.Audio.Media.DATA,
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.DATE_MODIFIED,
+            MediaStore.Audio.Media.TRACK,
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             projection.add(MediaStore.Audio.Media.RELATIVE_PATH)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            projection.add(MediaStore.Audio.Media.DISC_NUMBER)
         }
 
         val filterNonMusic = AppSettings.filterNonMusicAudio.value
@@ -570,6 +580,10 @@ object LocalMediaRepository {
                     val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         cursor.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
                     } else -1
+                    val trackCol = cursor.getColumnIndex(MediaStore.Audio.Media.TRACK)
+                    val discCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        cursor.getColumnIndex(MediaStore.Audio.Media.DISC_NUMBER)
+                    } else -1
 
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
@@ -591,22 +605,71 @@ object LocalMediaRepository {
                         if (!seenUris.add(contentUri)) continue
                         if (norm != null) seenPaths.add(norm)
 
+                        var discNum = if (discCol >= 0) cursor.getInt(discCol).takeIf { it > 0 } else null
+                        var trackNum: Int? = null
+                        if (trackCol >= 0) {
+                            val rawTrack = cursor.getInt(trackCol).takeIf { it > 0 }
+                            if (rawTrack != null) {
+                                if (rawTrack >= 1000) {
+                                    if (discNum == null) discNum = rawTrack / 1000
+                                    trackNum = rawTrack % 1000
+                                } else {
+                                    trackNum = rawTrack
+                                }
+                            }
+                        }
+
+                        if (rawAlbum != null) {
+                            val discMatch = DISC_SUFFIX_REGEX.find(rawAlbum)
+                            if (discMatch != null && discNum == null) {
+                                val dg = discMatch.groupValues.getOrNull(1)
+                                discNum = dg?.toIntOrNull() ?: dg?.firstOrNull()?.let { ch ->
+                                    if (ch.isLetter()) (ch.uppercaseChar() - 'A' + 1) else null
+                                }
+                            }
+                        }
+
+                        if (discNum == null && path != null) {
+                            val parent = File(path).parentFile
+                            if (parent != null && DISC_FOLDER_REGEX.matches(parent.name.trim())) {
+                                val match = DISC_FOLDER_REGEX.find(parent.name.trim())
+                                val dg = match?.groupValues?.getOrNull(1)
+                                discNum = dg?.toIntOrNull() ?: dg?.firstOrNull()?.let { ch ->
+                                    if (ch.isLetter()) (ch.uppercaseChar() - 'A' + 1) else null
+                                }
+                            }
+                        }
+
                         val title = rawTitle.cleanTag()?.removeAudioExtension()
                             ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
                             ?: "Track $id"
                         val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
-                        val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
+                        val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }?.let { cleanDiscSuffix(it) }
 
                         val folderArt = path?.let { p ->
                             val parent = File(p).parentFile
-                            if (parent != null && parent.exists()) {
-                                File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                    ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                    ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                    ?: File(parent, "Folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                    ?: File(parent, "cover.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                                    ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                            } else null
+                            val isDiscDir = parent != null && DISC_FOLDER_REGEX.matches(parent.name.trim())
+                            val searchDirs = if (isDiscDir && parent?.parentFile != null) {
+                                listOfNotNull(parent, parent.parentFile)
+                            } else {
+                                listOfNotNull(parent)
+                            }
+                            var foundArt: String? = null
+                            for (dir in searchDirs) {
+                                if (dir.exists()) {
+                                    val found = File(dir, "cover.jpg").takeIf { it.exists() }
+                                        ?: File(dir, "folder.jpg").takeIf { it.exists() }
+                                        ?: File(dir, "Cover.jpg").takeIf { it.exists() }
+                                        ?: File(dir, "Folder.jpg").takeIf { it.exists() }
+                                        ?: File(dir, "cover.png").takeIf { it.exists() }
+                                        ?: File(dir, "folder.png").takeIf { it.exists() }
+                                    if (found != null) {
+                                        foundArt = Uri.fromFile(found).toString()
+                                        break
+                                    }
+                                }
+                            }
+                            foundArt
                         }
                         val artworkUrl = folderArt ?: "audio:$contentUri"
                         val durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration)
@@ -623,8 +686,13 @@ object LocalMediaRepository {
                                 localPath = path,
                                 localDateAddedSeconds = cursor.getLong(dateAddedCol),
                                 localDateModifiedSeconds = cursor.getLong(dateModifiedCol),
+                                discNumber = discNum,
+                                trackNumber = trackNum,
                             )
                         )
+                        if (songs.size % 25 == 0) {
+                            notifyProgress()
+                        }
                     }
                 }
             }.onFailure { Log.w(TAG, "Failed scanning volume $volumeUri: ${it.message}") }
@@ -712,6 +780,7 @@ object LocalMediaRepository {
                                     seenUris.add(contentUri)
                                     if (norm != null) seenPaths.add(norm)
                                     songs.add(song.copy(localUri = contentUri))
+                                    if (songs.size % 25 == 0) notifyProgress()
                                     continue
                                 }
                             }
@@ -732,12 +801,15 @@ object LocalMediaRepository {
                                 localPath = path,
                                 localDateAddedSeconds = cursor.getLong(addedCol),
                                 localDateModifiedSeconds = cursor.getLong(modCol),
+                                discNumber = parsed.discNumber,
+                                trackNumber = parsed.trackNumber,
                             ),
                         )
+                        if (songs.size % 25 == 0) notifyProgress()
                     }
                 }
             }.onFailure { Log.w(TAG, "Failed scanning MediaStore.Files on $filesVolumeUri: ${it.message}") }
-            indexedCount.value = songs.size
+            notifyProgress(force = true)
         }
 
         // Direct file discovery on selected folder and standard storage paths
@@ -806,6 +878,7 @@ object LocalMediaRepository {
                                 if (seenUris.add(u)) {
                                     seenPaths.add(norm)
                                     songs.add(song)
+                                    if (songs.size % 25 == 0) notifyProgress()
                                 }
                             }
                         }
@@ -878,6 +951,7 @@ object LocalMediaRepository {
                                 seenUris.add(uriStr)
                                 if (normPath != null) seenPaths.add(normPath)
                                 songs.add(song)
+                                if (songs.size % 25 == 0) notifyProgress()
                             }
                         }
                     }
@@ -1263,10 +1337,24 @@ object LocalMediaRepository {
         return String.format(Locale.ROOT, "%d:%02d", minutes, secs)
     }
 
+    val DISC_FOLDER_REGEX = Regex("""^(?:cd|disc|disk)\s*([0-9]+|[a-zA-Z]+)?.*$""", RegexOption.IGNORE_CASE)
+    val DISC_SUFFIX_REGEX = Regex("""(?i)\s*(?:[-–—:]\s*)?(?:\(|\[)?\s*(?:cd|disc|disk)\s*([0-9]+|[a-zA-Z]+)\s*(?:\)|\])?""")
+
+    fun cleanDiscSuffix(raw: String): String {
+        val trimmed = raw.trim()
+        val cleaned = trimmed
+            .replace(Regex("""(?i)\s*[-–—:]\s*(?:cd|disc|disk)\s*[0-9a-z]+\b.*$"""), "")
+            .replace(Regex("""(?i)\s*[\(\[\{]\s*(?:cd|disc|disk)\s*[0-9a-z]+\s*[\)\]\}]"""), "")
+            .trim()
+        return if (cleaned.isNotBlank()) cleaned else trimmed
+    }
+
     internal data class ParsedFileMetadata(
         val title: String,
         val artist: String,
         val album: String?,
+        val discNumber: Int? = null,
+        val trackNumber: Int? = null,
     )
 
     internal fun String.cleanTrackNumber(): String {
@@ -1281,6 +1369,19 @@ object LocalMediaRepository {
         var title = baseName
         var artist = "Unknown Artist"
         var album: String? = null
+        var discNumber: Int? = null
+        var trackNumber: Int? = null
+
+        val discTrackMatch = Regex("""^(\d{1,2})-(\d{1,3})[\.\-\s_]+""").find(baseName)
+        if (discTrackMatch != null) {
+            discNumber = discTrackMatch.groupValues[1].toIntOrNull()
+            trackNumber = discTrackMatch.groupValues[2].toIntOrNull()
+        } else {
+            val trackMatch = Regex("""^(\d{1,3})[\.\-\s_]+""").find(baseName)
+            if (trackMatch != null) {
+                trackNumber = trackMatch.groupValues[1].toIntOrNull()
+            }
+        }
 
         if (" - " in baseName) {
             val parts = baseName.split(" - ")
@@ -1297,18 +1398,55 @@ object LocalMediaRepository {
         }
 
         if (parentDir != null && parentDir.name.isNotBlank()) {
-            val pName = parentDir.name
+            val pName = parentDir.name.trim()
             if (pName != "Music" && pName != "Download" && pName != "0" && pName != "emulated") {
-                album = pName
-                val gp = parentDir.parentFile
-                if (gp != null && gp.name.isNotBlank()) {
-                    val gpName = gp.name
-                    if (gpName != "Music" && gpName != "Download" && gpName != "0" && gpName != "emulated") {
+                val isDiscDir = DISC_FOLDER_REGEX.matches(pName)
+                if (isDiscDir) {
+                    val match = DISC_FOLDER_REGEX.find(pName)
+                    val dg = match?.groupValues?.getOrNull(1)
+                    if (discNumber == null) {
+                        discNumber = dg?.toIntOrNull() ?: dg?.firstOrNull()?.let { ch ->
+                            if (ch.isLetter()) (ch.uppercaseChar() - 'A' + 1) else null
+                        }
+                    }
+                    val gp = parentDir.parentFile
+                    if (gp != null && gp.name.isNotBlank() &&
+                        gp.name != "Music" && gp.name != "Download" && gp.name != "0" && gp.name != "emulated"
+                    ) {
+                        album = cleanDiscSuffix(gp.name)
+                        val ggp = gp.parentFile
+                        if (ggp != null && ggp.name.isNotBlank() &&
+                            ggp.name != "Music" && ggp.name != "Download" && ggp.name != "0" && ggp.name != "emulated"
+                        ) {
+                            if (artist == "Unknown Artist") {
+                                artist = ggp.name
+                            }
+                        }
+                    }
+                } else {
+                    album = cleanDiscSuffix(pName)
+                    val gp = parentDir.parentFile
+                    if (gp != null && gp.name.isNotBlank() &&
+                        gp.name != "Music" && gp.name != "Download" && gp.name != "0" && gp.name != "emulated"
+                    ) {
                         if (artist == "Unknown Artist") {
-                            artist = gpName
+                            artist = gp.name
                         }
                     }
                 }
+            }
+        }
+
+        if (album != null) {
+            val discMatch = DISC_SUFFIX_REGEX.find(album)
+            if (discMatch != null) {
+                if (discNumber == null) {
+                    val dg = discMatch.groupValues.getOrNull(1)
+                    discNumber = dg?.toIntOrNull() ?: dg?.firstOrNull()?.let { ch ->
+                        if (ch.isLetter()) (ch.uppercaseChar() - 'A' + 1) else null
+                    }
+                }
+                album = cleanDiscSuffix(album)
             }
         }
 
@@ -1316,6 +1454,8 @@ object LocalMediaRepository {
             title = title.cleanTrackNumber().ifBlank { baseName },
             artist = artist,
             album = album,
+            discNumber = discNumber,
+            trackNumber = trackNumber,
         )
     }
 
@@ -1325,43 +1465,79 @@ object LocalMediaRepository {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
 
-        if (AppSettings.filterNonMusicAudio.value) {
-            val durationMs = runCatching {
-                val mr = MediaMetadataRetriever()
-                mr.setDataSource(path)
-                val d = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                mr.release()
-                d
-            }.getOrDefault(0L)
-            if (!isEligibleLocalMusic(durationMs, name, path)) return null
-        }
-
         val parent = file.parentFile
         val parsed = parseMetadataFromPath(name, parent)
 
-        val folderArt = if (parent != null && parent.exists()) {
-            File(parent, "cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "Cover.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "Folder.jpg").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "cover.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-                ?: File(parent, "folder.png").takeIf { it.exists() }?.let { Uri.fromFile(it).toString() }
-        } else null
+        var title = parsed.title
+        var artist = parsed.artist
+        var album = parsed.album
+        var discNumber = parsed.discNumber
+        var trackNumber = parsed.trackNumber
+        var durationMs = 0L
+
+        runCatching {
+            val mr = MediaMetadataRetriever()
+            mr.setDataSource(path)
+            durationMs = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val metaTitle = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.cleanTag()?.removeAudioExtension()
+            val metaArtist = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.cleanTag()
+            val metaAlbum = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.cleanTag()
+            val metaDisc = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)
+                ?.substringBefore('/')?.trim()?.toIntOrNull()
+            val metaTrack = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                ?.substringBefore('/')?.trim()?.toIntOrNull()
+
+            if (!metaTitle.isNullOrBlank()) title = metaTitle
+            if (!metaArtist.isNullOrBlank() && metaArtist != "<unknown>") artist = metaArtist
+            if (!metaAlbum.isNullOrBlank() && metaAlbum != "<unknown>") album = cleanDiscSuffix(metaAlbum)
+            if (metaDisc != null && metaDisc > 0) discNumber = metaDisc
+            if (metaTrack != null && metaTrack > 0) trackNumber = metaTrack
+
+            mr.release()
+        }
+
+        if (AppSettings.filterNonMusicAudio.value && !isEligibleLocalMusic(durationMs, name, path)) {
+            return null
+        }
+
+        val isDiscDir = parent != null && DISC_FOLDER_REGEX.matches(parent.name.trim())
+        val searchDirs = if (isDiscDir && parent?.parentFile != null) {
+            listOfNotNull(parent, parent.parentFile)
+        } else {
+            listOfNotNull(parent)
+        }
+        var folderArt: String? = null
+        for (dir in searchDirs) {
+            if (dir.exists()) {
+                val found = File(dir, "cover.jpg").takeIf { it.exists() }
+                    ?: File(dir, "folder.jpg").takeIf { it.exists() }
+                    ?: File(dir, "Cover.jpg").takeIf { it.exists() }
+                    ?: File(dir, "Folder.jpg").takeIf { it.exists() }
+                    ?: File(dir, "cover.png").takeIf { it.exists() }
+                    ?: File(dir, "folder.png").takeIf { it.exists() }
+                if (found != null) {
+                    folderArt = Uri.fromFile(found).toString()
+                    break
+                }
+            }
+        }
 
         val modified = file.lastModified().takeIf { it > 0 }?.div(1000)
         val fileUri = Uri.fromFile(file).toString()
 
         return Song(
             videoId = fileUri,
-            title = parsed.title,
-            artist = parsed.artist,
+            title = title,
+            artist = artist,
             thumbnailUrl = folderArt ?: "audio:$fileUri",
-            durationText = null,
-            albumName = parsed.album,
+            durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration),
+            albumName = album,
             localUri = fileUri,
             localPath = path,
             localDateAddedSeconds = modified,
             localDateModifiedSeconds = modified,
+            discNumber = discNumber,
+            trackNumber = trackNumber,
         )
     }
 
@@ -1377,36 +1553,61 @@ object LocalMediaRepository {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
 
-        if (filterNonMusic) {
-            val durationMs = runCatching {
-                val mr = MediaMetadataRetriever()
-                if (physicalPath != null && File(physicalPath).exists()) {
-                    mr.setDataSource(physicalPath)
-                } else {
-                    mr.setDataSource(context, uri)
-                }
-                val d = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                mr.release()
-                d
-            }.getOrDefault(0L)
-            if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) return null
+        val parentFile = physicalPath?.let { File(it).parentFile }
+        val parsed = parseMetadataFromPath(name, parentFile)
+
+        var title = parsed.title
+        var artist = parsed.artist
+        var album = parsed.album
+        var discNumber = parsed.discNumber
+        var trackNumber = parsed.trackNumber
+        var durationMs = 0L
+
+        runCatching {
+            val mr = MediaMetadataRetriever()
+            if (physicalPath != null && File(physicalPath).exists()) {
+                mr.setDataSource(physicalPath)
+            } else {
+                mr.setDataSource(context, uri)
+            }
+            durationMs = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val metaTitle = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.cleanTag()?.removeAudioExtension()
+            val metaArtist = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.cleanTag()
+            val metaAlbum = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.cleanTag()
+            val metaDisc = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)
+                ?.substringBefore('/')?.trim()?.toIntOrNull()
+            val metaTrack = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                ?.substringBefore('/')?.trim()?.toIntOrNull()
+
+            if (!metaTitle.isNullOrBlank()) title = metaTitle
+            if (!metaArtist.isNullOrBlank() && metaArtist != "<unknown>") artist = metaArtist
+            if (!metaAlbum.isNullOrBlank() && metaAlbum != "<unknown>") album = cleanDiscSuffix(metaAlbum)
+            if (metaDisc != null && metaDisc > 0) discNumber = metaDisc
+            if (metaTrack != null && metaTrack > 0) trackNumber = metaTrack
+
+            mr.release()
         }
 
-        val parsed = parseMetadataFromPath(name, physicalPath?.let { File(it).parentFile })
+        if (filterNonMusic && !isEligibleLocalMusic(durationMs, name, physicalPath)) {
+            return null
+        }
+
         val modified = lastModifiedMs.takeIf { it > 0 }?.div(1000)
         val uriStr = uri.toString()
 
         return Song(
             videoId = uriStr,
-            title = parsed.title,
-            artist = parsed.artist,
+            title = title,
+            artist = artist,
             thumbnailUrl = folderArtUri ?: "audio:$uriStr",
-            durationText = null,
-            albumName = parsed.album,
+            durationText = durationMs.takeIf { it > 0 }?.let(::formatDuration),
+            albumName = album,
             localUri = uriStr,
             localPath = physicalPath,
             localDateAddedSeconds = modified,
             localDateModifiedSeconds = modified,
+            discNumber = discNumber,
+            trackNumber = trackNumber,
         )
     }
 

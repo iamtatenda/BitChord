@@ -34,6 +34,7 @@ object OnlineArtworkRepository {
     private val FEATURING_REGEX = Regex("""(?i)\s*(?:\(|\[)?\s*(?:feat\.?|ft\.?|featuring|with)\b[^\)\]]*(?:\)|\])?""")
     private val VIDEO_DESCRIPTOR_REGEX = Regex("""(?i)\s*(?:\(|\[)\s*(?:official\s+(?:video|audio|music\s+video|visualizer|lyric\s+video)|lyrics?|audio|remastered(?:\s+\d{4})?|\d+kbps|1080p|720p|hd|hq|4k)\s*(?:\)|\])""")
     private val EDITION_REGEX = Regex("""(?i)\s*(?:\(|\[)\s*(?:deluxe|bonus\s+track|expanded|collector's|anniversary|special|remastered)\s+(?:edition|version)?\s*(?:\)|\])""")
+    private val DISC_SUFFIX_REGEX = Regex("""(?i)(?:\s*[-–—:]\s*(?:cd|disc|disk)\s*[0-9a-z]+\b.*$|\s*[\(\[\{]\s*(?:cd|disc|disk)\s*[0-9a-z]+\s*[\)\]\}])""")
 
     private val GENERIC_ALBUM_NAMES = setOf(
         "singles", "single", "downloads", "download", "music", "audio", "unknown",
@@ -65,10 +66,13 @@ object OnlineArtworkRepository {
         val lower = trimmed.lowercase(Locale.ROOT)
         if (lower in GENERIC_ALBUM_NAMES) return ""
         val clean = trimmed
+            .replace(DISC_SUFFIX_REGEX, "")
             .replace(EDITION_REGEX, "")
             .replace(VIDEO_DESCRIPTOR_REGEX, "")
             .trim()
-        if (clean.lowercase(Locale.ROOT) in GENERIC_ALBUM_NAMES) return ""
+        val cleanLower = clean.lowercase(Locale.ROOT)
+        if (cleanLower in GENERIC_ALBUM_NAMES) return ""
+        if (cleanLower.matches(Regex("""^(?:cd|disc|disk)\s*[0-9a-z]*$"""))) return ""
         return clean
     }
 
@@ -190,13 +194,23 @@ object OnlineArtworkRepository {
         if (!path.isNullOrBlank()) {
             val parent = File(path).parentFile
             if (parent != null && parent.exists()) {
-                val hasCover = File(parent, "cover.jpg").exists() ||
-                    File(parent, "folder.jpg").exists() ||
-                    File(parent, "Cover.jpg").exists() ||
-                    File(parent, "Folder.jpg").exists() ||
-                    File(parent, "cover.png").exists() ||
-                    File(parent, "folder.png").exists()
-                if (hasCover) return true
+                val isDiscDir = parent.name.matches(Regex("""(?i)^(?:cd|disc|disk)\s*[0-9a-z]*$"""))
+                val searchDirs = if (isDiscDir && parent.parentFile != null) {
+                    listOf(parent, parent.parentFile)
+                } else {
+                    listOf(parent)
+                }
+                for (dir in searchDirs) {
+                    if (dir.exists()) {
+                        val hasCover = File(dir, "cover.jpg").exists() ||
+                            File(dir, "folder.jpg").exists() ||
+                            File(dir, "Cover.jpg").exists() ||
+                            File(dir, "Folder.jpg").exists() ||
+                            File(dir, "cover.png").exists() ||
+                            File(dir, "folder.png").exists()
+                        if (hasCover) return true
+                    }
+                }
             }
         }
         val rawUri = song.localUri ?: song.localPath ?: return false
@@ -549,8 +563,10 @@ object OnlineArtworkRepository {
 
         val path = song.localPath ?: return false
         val songFile = File(path)
-        val folder = songFile.parentFile ?: return false
-        if (!folder.exists() || !folder.isDirectory) return false
+        val rawFolder = songFile.parentFile ?: return false
+        if (!rawFolder.exists() || !rawFolder.isDirectory) return false
+        val isDiscDir = rawFolder.name.matches(Regex("""(?i)^(?:cd|disc|disk)\s*[0-9a-z]*$"""))
+        val folder = if (isDiscDir && rawFolder.parentFile != null && rawFolder.parentFile.exists()) rawFolder.parentFile else rawFolder
 
         // Critical safety: never pollute top-level user directories with album covers
         val fPath = folder.absolutePath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)

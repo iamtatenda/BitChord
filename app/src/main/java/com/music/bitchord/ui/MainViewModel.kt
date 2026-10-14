@@ -2491,11 +2491,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         songs: List<Song>,
         key: String = "$title:$artist",
     ) {
+        val sortedSongs = songs.sortedWith(
+            compareBy<Song> { it.discNumber ?: 1 }
+                .thenBy { it.trackNumber ?: Int.MAX_VALUE }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+        )
         val entry = AlbumEntry(
             title = title,
             artist = artist,
             thumbnailUrl = thumbnailUrl,
-            songs = songs,
+            songs = sortedSongs,
             key = key,
         )
         localAlbumsByKey[key] = entry
@@ -2508,7 +2513,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             title = title,
             subtitle = artist,
             thumbnailUrl = thumbnailUrl,
-            songs = UiState.Success(songs),
+            songs = UiState.Success(sortedSongs),
             type = BrowseType.ALBUM,
         )
     }
@@ -2521,11 +2526,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         for ((albumName, albumSongs) in groups) {
             val title = albumName?.trim()?.takeIf { it.isNotEmpty() } ?: continue
             val key = "tagged:$title"
+            val sortedAlbumSongs = albumSongs.sortedWith(
+                compareBy<Song> { it.discNumber ?: 1 }
+                    .thenBy { it.trackNumber ?: Int.MAX_VALUE }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+            )
             val entry = AlbumEntry(
                 title = title,
                 artist = artistName,
-                thumbnailUrl = albumSongs.firstNotNullOfOrNull { it.thumbnailUrl },
-                songs = albumSongs,
+                thumbnailUrl = sortedAlbumSongs.firstNotNullOfOrNull { it.thumbnailUrl },
+                songs = sortedAlbumSongs,
                 key = key,
             )
             localAlbumsByKey[key] = entry
@@ -2716,8 +2726,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             (p.title == title || p.browseId == "local:album:$albumKey" || p.browseId == "local:album:$title:$artist")
                         ) {
                             p.copy(thumbnailUrl = art, songs = UiState.Success(updatedSongs))
+                        } else if (p.browseId == "local:all" || p.browseId == "local:downloads") {
+                            val current = (p.songs as? UiState.Success)?.data ?: return@map p
+                            val updated = current.map { s ->
+                                val newArt = updates[s.videoId] ?: updates[s.localUri] ?: updates[s.localPath]
+                                if (newArt != null) s.copy(thumbnailUrl = newArt) else s
+                            }
+                            p.copy(songs = UiState.Success(updated))
                         } else p
                     }
+                    val libCurrent = (_librarySongs.value as? UiState.Success)?.data
+                    if (libCurrent != null) {
+                        val updatedLib = libCurrent.map { s ->
+                            val newArt = updates[s.videoId] ?: updates[s.localUri] ?: updates[s.localPath]
+                            if (newArt != null) s.copy(thumbnailUrl = newArt) else s
+                        }
+                        _librarySongs.value = UiState.Success(updatedLib)
+                    }
+                    com.music.bitchord.ui.screens.LocalMusicDerivedCache.invalidate()
                     android.widget.Toast.makeText(
                         context,
                         context.getString(R.string.album_art_updated),
@@ -2768,12 +2794,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.Main) {
                     _detailStack.value = _detailStack.value.map { p ->
                         val songs = (p.songs as? UiState.Success)?.data ?: return@map p
-                        if (songs.any { it.videoId == song.videoId || it.localUri == song.localUri }) {
+                        if (songs.any { it.videoId == song.videoId || it.localUri == song.localUri || it.localPath == song.localPath }) {
                             p.copy(songs = UiState.Success(songs.map {
-                                if (it.videoId == song.videoId || it.localUri == song.localUri) it.copy(thumbnailUrl = art) else it
+                                if (it.videoId == song.videoId || it.localUri == song.localUri || it.localPath == song.localPath) it.copy(thumbnailUrl = art) else it
                             }))
                         } else p
                     }
+                    val libCurrent = (_librarySongs.value as? UiState.Success)?.data
+                    if (libCurrent != null) {
+                        val updatedLib = libCurrent.map { s ->
+                            if (s.videoId == song.videoId || s.localUri == song.localUri || s.localPath == song.localPath) {
+                                s.copy(thumbnailUrl = art)
+                            } else s
+                        }
+                        _librarySongs.value = UiState.Success(updatedLib)
+                    }
+                    com.music.bitchord.ui.screens.LocalMusicDerivedCache.invalidate()
                     android.widget.Toast.makeText(
                         context,
                         context.getString(R.string.album_art_updated),

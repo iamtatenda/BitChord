@@ -47,6 +47,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.luminance
@@ -301,7 +302,7 @@ fun DetailScreen(
     // numbers are the sleeve's own and must not relabel themselves to match
     // wherever a sort put the row.
     val originalTrackNumbers = remember(rawSongs) {
-        rawSongs.withIndex().associate { (i, s) -> s.videoId to i + 1 }
+        rawSongs.withIndex().associate { (i, s) -> s.videoId to (s.trackNumber ?: (i + 1)) }
     }
     val isArtist = page.type == BrowseType.ARTIST
     // Whether the top release card's album is already saved isn't on the shelf
@@ -604,6 +605,9 @@ fun DetailScreen(
                     // already the largest thing on the page — Apple Music
                     // numbers those rows instead, and so does this.
                     val numbered = page.type == BrowseType.ALBUM
+                    val hasMultipleDiscs = numbered && songSort == SongSort.DEFAULT && remember(matches) {
+                        matches.mapNotNull { it.value.discNumber }.filter { it > 0 }.distinct().size > 1
+                    }
                     if (matches.isEmpty() && state.data.isNotEmpty()) {
                         item(key = "no-matches") {
                             MessageState(stringResource(R.string.nothing_matches, query))
@@ -614,6 +618,23 @@ fun DetailScreen(
                         key = { _, entry -> "${entry.index}_${entry.value.videoId}" },
                     ) { position, entry ->
                         val song = entry.value
+                        val currentDisc = song.discNumber ?: 1
+                        val prevDisc = if (position > 0) matches[position - 1].value.discNumber ?: 1 else null
+                        val showDiscHeader = hasMultipleDiscs && (position == 0 || currentDisc != prevDisc)
+
+                        if (showDiscHeader) {
+                            DiscHeader(
+                                discNumber = currentDisc,
+                                palette = palette,
+                                modifier = Modifier.padding(
+                                    start = if (numbered) NUMBERED_ROW_DIVIDER_INSET else ROW_DIVIDER_INSET,
+                                    top = if (position == 0) 12.dp else 24.dp,
+                                    bottom = 8.dp,
+                                    end = PAGE_GUTTER,
+                                ),
+                            )
+                        }
+
                         val isCurrent = song.isSameTrackAs(currentSong)
                         SongRow(
                             song = if (numbered) {
@@ -637,7 +658,9 @@ fun DetailScreen(
                             activeTint = palette.accent,
                             searchPlayingStyle = true,
                         )
-                        if (position < matches.lastIndex) {
+                        val nextDisc = if (position < matches.lastIndex) matches[position + 1].value.discNumber ?: 1 else null
+                        val nextHasHeader = hasMultipleDiscs && nextDisc != currentDisc
+                        if (position < matches.lastIndex && !nextHasHeader) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(
                                     start = if (numbered) NUMBERED_ROW_DIVIDER_INSET else ROW_DIVIDER_INSET,
@@ -2008,5 +2031,32 @@ private fun List<Song>.playtime(): String? {
         minutes <= 0 -> null
         minutes < 60 -> stringResource(R.string.minutes_short, minutes.toInt())
         else -> stringResource(R.string.hours_minutes_short, (minutes / 60).toInt(), (minutes % 60).toInt())
+    }
+}
+
+@Composable
+private fun DiscHeader(
+    discNumber: Int,
+    palette: ArtworkPalette,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Album,
+            contentDescription = null,
+            tint = palette.onBackgroundVariant.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "Disc $discNumber",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = palette.onBackgroundVariant,
+            letterSpacing = 0.5.sp,
+        )
     }
 }

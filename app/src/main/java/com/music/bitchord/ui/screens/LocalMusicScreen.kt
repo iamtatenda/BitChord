@@ -108,6 +108,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.canvas.AppleArtistArtRepository
@@ -639,40 +640,10 @@ fun LocalMusicScreen(
             modifier = Modifier.fillMaxSize(),
         ) { key ->
             when {
-                // Initial scan in progress and nothing loaded yet
-                sortedSongs.isEmpty() && isIndexing -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(bodyContentPadding),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
-                                strokeWidth = 3.dp,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                text = if (indexedCount > 0)
-                                    stringResource(R.string.indexing_library_progress, indexedCount)
-                                else
-                                    stringResource(R.string.indexing_library_searching),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-
                 // Nothing to tab through. The tab row stays put rather than
                 // being swapped out with the list, so the page still reads as
                 // itself while it says why it's empty.
-                sortedSongs.isEmpty() && emptyMessage != null -> {
+                sortedSongs.isEmpty() && !isIndexing && emptyMessage != null -> {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -741,6 +712,7 @@ fun LocalMusicScreen(
                         // carry the actions sheet itself or the page loses it.
                         onSongMore = onSongLongPress,
                         onSongSwipe = onSongSwipe,
+                        onShuffle = onShuffle,
                         contentPadding = bodyContentPadding,
                     )
                 }
@@ -833,6 +805,7 @@ private fun SongsTab(
     /** The row's ⋮, where holding it does something else — see [SongRow]. */
     onSongMore: ((Song) -> Unit)? = null,
     onSongSwipe: (Song) -> Unit,
+    onShuffle: ((List<Song>) -> Unit)? = null,
     contentPadding: PaddingValues,
 ) {
     if (viewType == LibraryViewType.GRID) {
@@ -850,11 +823,45 @@ private fun SongsTab(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHeader(
-                    icon = Icons.Rounded.LibraryMusic,
-                    title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
-                    modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 0.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    SectionHeader(
+                        icon = Icons.Rounded.LibraryMusic,
+                        title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
+                        modifier = Modifier,
+                    )
+                    if (onShuffle != null && songs.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                            onClick = { onShuffle(songs) },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = BitChordIcons.Shuffle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                                Text(
+                                    text = stringResource(R.string.shuffle),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
+                }
             }
             itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                 SongGridCard(
@@ -875,10 +882,45 @@ private fun SongsTab(
             contentPadding = contentPadding,
         ) {
             item {
-                SectionHeader(
-                    icon = Icons.Rounded.LibraryMusic,
-                    title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    SectionHeader(
+                        icon = Icons.Rounded.LibraryMusic,
+                        title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
+                        modifier = Modifier,
+                    )
+                    if (onShuffle != null && songs.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                            onClick = { onShuffle(songs) },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = BitChordIcons.Shuffle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                                Text(
+                                    text = stringResource(R.string.shuffle),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
+                }
             }
             itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                 SongRow(
@@ -1269,25 +1311,34 @@ private fun albumEntries(
     }
     val claimed = asked.mapTo(HashSet()) { it.title.lowercase(Locale.ROOT) }
     val derived = songs
-        .groupBy { it.albumName }
+        .groupBy { song ->
+            val raw = song.albumName ?: return@groupBy null
+            LocalMediaRepository.cleanDiscSuffix(raw)
+        }
         .mapNotNull { (name, group) ->
             // Null is every track that never said what release it was off, and
             // there is no row to draw for "no album" — those are the Songs tab's
             // and nothing else's.
-            if (name == null || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
+            if (name == null || name.isBlank() || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
             val albumCover = group.firstOrNull {
                 val thumb = it.thumbnailUrl
                 thumb != null && !thumb.startsWith("audio:")
             }?.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
 
+            val sortedGroup = group.sortedWith(
+                compareBy<Song> { it.discNumber ?: 1 }
+                    .thenBy { it.trackNumber ?: 0 }
+                    .thenBy { it.title.lowercase(Locale.ROOT) },
+            )
+
             val updatedSongs = if (albumCover != null) {
-                group.map { s ->
+                sortedGroup.map { s ->
                     val thumb = s.thumbnailUrl
                     if (thumb == null || thumb.startsWith("audio:")) {
                         s.copy(thumbnailUrl = albumCover)
                     } else s
                 }
-            } else group
+            } else sortedGroup
 
             AlbumEntry(
                 title = name,
@@ -2267,7 +2318,26 @@ private fun DrillDownSongList(
                         onShuffle = onShuffle,
                     )
                 }
+                val hasMultipleDiscs = !displayIsArtist && remember(displaySongs) {
+                    displaySongs.mapNotNull { it.discNumber }.filter { it > 0 }.distinct().size > 1
+                }
                 itemsIndexed(displaySongs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
+                    val currentDisc = song.discNumber ?: 1
+                    val prevDisc = if (index > 0) displaySongs[index - 1].discNumber ?: 1 else null
+                    val showDiscHeader = hasMultipleDiscs && (index == 0 || currentDisc != prevDisc)
+
+                    if (showDiscHeader) {
+                        DiscSectionHeader(
+                            discNumber = currentDisc,
+                            modifier = Modifier.padding(
+                                start = NUMBERED_ROW_DIVIDER_INSET,
+                                top = if (index == 0) 12.dp else 24.dp,
+                                bottom = 8.dp,
+                                end = PAGE_GUTTER,
+                            ),
+                        )
+                    }
+
                     SongRow(
                         song = song,
                         selected = song.videoId in selectedIds,
@@ -2275,13 +2345,15 @@ private fun DrillDownSongList(
                         isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
                         searchPlayingStyle = true,
                         activeTint = PlayingAccent,
-                        trackNumber = index + 1,
+                        trackNumber = song.trackNumber ?: (index + 1),
                         onClick = { onSongClick(displaySongs, index) },
                         onLongPress = { onSongLongPress(song) },
                         onMore = onSongMore?.let { more -> { more(song) } },
                         onSwipeToQueue = { onSongSwipe(song) },
                     )
-                    if (index < displaySongs.lastIndex) {
+                    val nextDisc = if (index < displaySongs.lastIndex) displaySongs[index + 1].discNumber ?: 1 else null
+                    val nextHasHeader = hasMultipleDiscs && nextDisc != currentDisc
+                    if (index < displaySongs.lastIndex && !nextHasHeader) {
                         HorizontalDivider(
                             modifier = Modifier.padding(start = NUMBERED_ROW_DIVIDER_INSET),
                             thickness = 0.5.dp,
@@ -2291,6 +2363,32 @@ private fun DrillDownSongList(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DiscSectionHeader(
+    discNumber: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Album,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "Disc $discNumber",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 0.5.sp,
+        )
     }
 }
 

@@ -1478,7 +1478,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 val albumTitle = page.title
                                 val albumSongs = batch.filter { it.albumName?.equals(albumTitle, ignoreCase = true) == true }
                                 if (albumSongs.isNotEmpty()) {
-                                    val art = albumSongs.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+                                    val art = albumSongs.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
                                         ?: albumSongs.firstNotNullOfOrNull { it.thumbnailUrl }
                                     page.copy(thumbnailUrl = art ?: page.thumbnailUrl, songs = UiState.Success(albumSongs))
                                 } else page
@@ -1486,7 +1486,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             page.browseId.startsWith("local:artist:") -> {
                                 val artistName = page.title
                                 val artistSongs = batch.filter {
-                                    com.music.bitchord.ui.screens.splitArtists(it.artist).any { a -> a.equals(artistName, ignoreCase = true) }
+                                    com.music.bitchord.data.LocalMediaRepository.splitArtists(it.artist).any { a: String -> a.equals(artistName, ignoreCase = true) }
                                 }
                                 if (artistSongs.isNotEmpty()) {
                                     val shelves = buildLocalArtistShelves(artistName, artistSongs)
@@ -2554,7 +2554,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
             )
             val albumCover = sortedAlbumSongs.firstOrNull {
-                it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:")
+                it.thumbnailUrl?.startsWith("audio:") == false
             }?.thumbnailUrl ?: sortedAlbumSongs.firstNotNullOfOrNull { it.thumbnailUrl }
 
             val entry = AlbumEntry(
@@ -3458,7 +3458,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val artistName = browseId.removePrefix("local:artist:")
                     val allSongs = (_librarySongs.value as? UiState.Success)?.data ?: LocalMediaRepository.getLocalMusic(context)
                     val matched = allSongs.filter {
-                        com.music.bitchord.ui.screens.splitArtists(it.artist).any { a -> a.equals(artistName, ignoreCase = true) }
+                        com.music.bitchord.data.LocalMediaRepository.splitArtists(it.artist).any { a: String -> a.equals(artistName, ignoreCase = true) }
                     }
                     matched.ifEmpty { error("Artist tracks not found") }
                 }

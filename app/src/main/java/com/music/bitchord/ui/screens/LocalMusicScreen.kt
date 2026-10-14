@@ -475,13 +475,13 @@ fun LocalMusicScreen(
     LaunchedEffect(songs) {
         val label = drillDownLabel ?: return@LaunchedEffect
         if (drillDownIsArtist) {
-            val updated = songs.filter { splitArtists(it.artist).any { a -> a.equals(label, ignoreCase = true) } }
+            val updated = songs.filter { com.music.bitchord.data.LocalMediaRepository.splitArtists(it.artist).any { a: String -> a.equals(label, ignoreCase = true) } }
             if (updated.isNotEmpty()) drillDownSongs = updated
         } else {
             val updated = songs.filter { it.albumName?.equals(label, ignoreCase = true) == true }
             if (updated.isNotEmpty()) {
                 drillDownSongs = updated
-                val newArt = updated.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+                val newArt = updated.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
                     ?: updated.firstNotNullOfOrNull { it.thumbnailUrl }
                 if (newArt != null) drillDownArt = newArt
             }
@@ -1283,7 +1283,7 @@ private fun ArtistGridCard(
  * an album, and the order its tracks go in — and none of those has anywhere to
  * live in a map entry.
  */
-class AlbumEntry(
+data class AlbumEntry(
     val title: String,
     val artist: String,
     val thumbnailUrl: String?,
@@ -2134,7 +2134,7 @@ private fun DrillDownSongList(
         val current = albumDrillDown ?: return@LaunchedEffect
         val updatedGroup = songs.filter { (it.albumName?.ifBlank { null } ?: "Singles & Other Tracks").equals(current.title, ignoreCase = true) }
         if (updatedGroup.isNotEmpty()) {
-            val art = updatedGroup.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+            val art = updatedGroup.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
                 ?: updatedGroup.firstNotNullOfOrNull { it.thumbnailUrl } ?: current.thumbnailUrl
             albumDrillDown = current.copy(thumbnailUrl = art, songs = updatedGroup)
         }
@@ -2159,7 +2159,7 @@ private fun DrillDownSongList(
         else songs
             .groupBy { it.albumName?.ifBlank { null } ?: "Singles & Other Tracks" }
             .map { (name, group) ->
-                val art = group.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+                val art = group.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
                     ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
                 AlbumEntry(
                     title = name,

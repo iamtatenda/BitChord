@@ -1207,6 +1207,22 @@ fun SettingsScreen(
                     onClick = { AppSettings.setNoLocalAlbums(!noLocalAlbums) },
                 )
             }
+            val resetArtTitle = "Reset Local Artwork Cache"
+            row(resetArtTitle, "reset", "clear", "artwork", "cache", "rescan", "cover") {
+                SettingsRow(
+                    icon = Icons.Rounded.Cached,
+                    title = resetArtTitle,
+                    subtitle = "Purge cached online artwork and restore original embedded covers from disk",
+                    onClick = {
+                        backupScope.launch {
+                            LocalMediaRepository.clearCache(context)
+                            val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
+                            com.music.bitchord.ui.screens.LocalMusicDerivedCache.invalidate()
+                            LocalMediaRepository.liveDiscoveredSongs.value = fresh
+                        }
+                    },
+                )
+            }
         }
 
         val cacheUnlimited = cacheLimitBytes == AppSettings.UNLIMITED_CACHE_LIMIT_BYTES

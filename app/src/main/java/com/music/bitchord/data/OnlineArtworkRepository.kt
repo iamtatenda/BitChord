@@ -82,6 +82,22 @@ object OnlineArtworkRepository {
         embeddedArtCache.clear()
     }
 
+    fun clearCache(context: Context) {
+        synchronized(memoryCache) {
+            memoryCache.clear()
+        }
+        embeddedArtCache.clear()
+        diskLoaded = false
+        val file = File(context.filesDir, DISK_FILE)
+        if (file.exists()) {
+            runCatching { file.delete() }
+        }
+        val tmp = File(context.filesDir, "$DISK_FILE.tmp")
+        if (tmp.exists()) {
+            runCatching { tmp.delete() }
+        }
+    }
+
     private fun splitArtists(raw: String): List<String> {
         return raw.replace(FEATURING_REGEX, "")
             .split(Regex("""(?i)\s+(?:feat\.?|ft\.?|featuring|&|/|x)\s+|,"""))

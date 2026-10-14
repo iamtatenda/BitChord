@@ -128,6 +128,7 @@ object LocalMediaRepository {
             val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
             if (cacheFile.exists()) cacheFile.delete()
         }
+        OnlineArtworkRepository.clearCache(context)
     }
 
     /**

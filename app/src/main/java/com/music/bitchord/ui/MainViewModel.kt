@@ -2024,6 +2024,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             runCatching {
+                LocalMediaRepository.clearCache(context)
                 val fresh = LocalMediaRepository.scanAndCacheLocalMusic(context)
                 val state = if (fresh.isEmpty()) UiState.Error(text(R.string.no_local_audio_found)) else UiState.Success(fresh)
                 _detailStack.value = _detailStack.value.map {

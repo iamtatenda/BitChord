@@ -72,31 +72,82 @@ object OnlineArtworkRepository {
         return clean
     }
 
+    private val embeddedArtCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    @Volatile
+    private var isDirty = false
+    @Volatile
+    private var lastSaveTime = 0L
+
+    fun clearEmbeddedArtCache() {
+        embeddedArtCache.clear()
+    }
+
+    private fun splitArtists(raw: String): List<String> {
+        return raw.replace(FEATURING_REGEX, "")
+            .split(Regex("""(?i)\s+(?:feat\.?|ft\.?|featuring|&|/|x)\s+|,"""))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+    }
+
+    private fun levenshteinDistance(s1: String, s2: String): Int {
+        val dp = IntArray(s2.length + 1) { it }
+        for (i in 1..s1.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..s2.length) {
+                val temp = dp[j]
+                dp[j] = if (s1[i - 1] == s2[j - 1]) prev else minOf(prev, dp[j], dp[j - 1]) + 1
+                prev = temp
+            }
+        }
+        return dp[s2.length]
+    }
+
+    private fun similarity(s1: String, s2: String): Double {
+        if (s1 == s2) return 1.0
+        if (s1.isEmpty() || s2.isEmpty()) return 0.0
+        val maxLen = maxOf(s1.length, s2.length)
+        val dist = levenshteinDistance(s1, s2)
+        return 1.0 - (dist.toDouble() / maxLen.toDouble())
+    }
+
     private fun String.normalized(): String =
         Normalizer.normalize(lowercase(Locale.ROOT), Normalizer.Form.NFD)
             .filter { it.isLetterOrDigit() }
 
     private fun matchesArtist(target: String, candidate: String): Boolean {
-        val t = target.normalized()
-        val c = candidate.normalized()
-        if (t.isEmpty() || c.isEmpty()) return false
-        if (t == c || t.contains(c) || c.contains(t)) return true
+        val tNorm = target.normalized()
+        val cNorm = candidate.normalized()
+        if (tNorm.isEmpty() || cNorm.isEmpty()) return false
+        if (tNorm == cNorm) return true
+        if (similarity(tNorm, cNorm) >= 0.85) return true
 
-        val parts = target.split(Regex("""(?i)\s+(?:feat\.?|ft\.?|featuring|&|/)\s+|,"""))
-            .map { it.normalized() }
-            .filter { it.length >= 3 }
-        for (part in parts) {
-            if (c.contains(part) || part.contains(c)) return true
+        val targetArtists = splitArtists(target).map { it.normalized() }.filter { it.length >= 3 }
+        val candidateArtists = splitArtists(candidate).map { it.normalized() }.filter { it.length >= 3 }
+
+        for (tArt in targetArtists) {
+            for (cArt in candidateArtists) {
+                if (tArt == cArt) return true
+                if (tArt.length >= 4 && cArt.length >= 4 && similarity(tArt, cArt) >= 0.85) return true
+            }
         }
         return false
     }
 
     private fun matchesTitle(target: String, candidate: String): Boolean {
-        val t = target.normalized()
-        val c = candidate.normalized()
+        val tClean = sanitizeTitle(target)
+        val cClean = sanitizeTitle(candidate)
+        val t = tClean.normalized()
+        val c = cClean.normalized()
         if (t.isEmpty() || c.isEmpty()) return false
-        if (t == c || t.startsWith(c) || c.startsWith(t)) return true
-        if (t.length >= 4 && c.length >= 4 && (t.contains(c) || c.contains(t))) return true
+        if (t == c) return true
+        if (similarity(t, c) >= 0.85) return true
+
+        val minLen = minOf(t.length, c.length)
+        val maxLen = maxOf(t.length, c.length)
+        if (minLen >= 6 && (t.startsWith(c) || c.startsWith(t)) && (minLen.toDouble() / maxLen.toDouble() >= 0.8)) {
+            return true
+        }
         return false
     }
 
@@ -133,8 +184,11 @@ object OnlineArtworkRepository {
             }
         }
         val rawUri = song.localUri ?: song.localPath ?: return false
+        val cacheKey = song.localPath ?: song.localUri ?: song.videoId
+        embeddedArtCache[cacheKey]?.let { return it }
+
         val retriever = MediaMetadataRetriever()
-        return try {
+        val hasEmbedded = try {
             if (rawUri.startsWith("/")) {
                 retriever.setDataSource(rawUri)
             } else {
@@ -146,6 +200,8 @@ object OnlineArtworkRepository {
         } finally {
             try { retriever.release() } catch (_: Throwable) {}
         }
+        embeddedArtCache[cacheKey] = hasEmbedded
+        return hasEmbedded
     }
 
     private fun loadDiskCache(context: Context) {
@@ -166,6 +222,24 @@ object OnlineArtworkRepository {
                 }
             }
             diskLoaded = true
+        }
+    }
+
+    private fun markCacheUpdated(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastSaveTime > 5000L) {
+            lastSaveTime = now
+            saveDiskCache(context)
+        } else {
+            isDirty = true
+        }
+    }
+
+    fun flushDiskCache(context: Context) {
+        if (isDirty) {
+            isDirty = false
+            lastSaveTime = System.currentTimeMillis()
+            saveDiskCache(context)
         }
     }
 
@@ -217,7 +291,7 @@ object OnlineArtworkRepository {
 
         if (art != null) {
             synchronized(memoryCache) { memoryCache[key] = art }
-            saveDiskCache(context)
+            markCacheUpdated(context)
         }
         art
     }
@@ -259,7 +333,7 @@ object OnlineArtworkRepository {
 
         if (art != null) {
             synchronized(memoryCache) { memoryCache[key] = art }
-            saveDiskCache(context)
+            markCacheUpdated(context)
         }
         art
     }
@@ -283,7 +357,11 @@ object OnlineArtworkRepository {
                 val candidateArtist = r.optString("artistName")
                 val candidateAlbum = r.optString("collectionName")
 
-                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val artistMatches = if (artist.isNotBlank()) {
+                    matchesArtist(artist, candidateArtist)
+                } else {
+                    candidateArtist.isNotBlank() && album.length >= 6 && album.normalized() == candidateAlbum.normalized()
+                }
                 val albumMatches = matchesTitle(album, candidateAlbum)
 
                 if (artistMatches && albumMatches) {
@@ -317,7 +395,11 @@ object OnlineArtworkRepository {
                 val candidateArtist = r.optString("artistName")
                 val candidateTitle = r.optString("trackName")
 
-                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val artistMatches = if (artist.isNotBlank()) {
+                    matchesArtist(artist, candidateArtist)
+                } else {
+                    candidateArtist.isNotBlank() && title.length >= 6 && title.normalized() == candidateTitle.normalized()
+                }
                 val titleMatches = matchesTitle(title, candidateTitle)
 
                 if (artistMatches && titleMatches) {
@@ -348,7 +430,11 @@ object OnlineArtworkRepository {
                 val candidateArtist = r.optJSONObject("artist")?.optString("name").orEmpty()
                 val candidateTitle = r.optString("title")
 
-                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val artistMatches = if (artist.isNotBlank()) {
+                    matchesArtist(artist, candidateArtist)
+                } else {
+                    candidateArtist.isNotBlank() && album.length >= 6 && album.normalized() == candidateTitle.normalized()
+                }
                 val albumMatches = matchesTitle(album, candidateTitle)
 
                 if (artistMatches && albumMatches) {
@@ -377,7 +463,11 @@ object OnlineArtworkRepository {
                 val candidateArtist = r.optJSONObject("artist")?.optString("name").orEmpty()
                 val candidateTitle = r.optString("title")
 
-                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val artistMatches = if (artist.isNotBlank()) {
+                    matchesArtist(artist, candidateArtist)
+                } else {
+                    candidateArtist.isNotBlank() && title.length >= 6 && title.normalized() == candidateTitle.normalized()
+                }
                 val titleMatches = matchesTitle(title, candidateTitle)
 
                 if (artistMatches && titleMatches) {
@@ -400,7 +490,11 @@ object OnlineArtworkRepository {
             val candidateTitle = item.item.title
             val candidateArtist = item.item.subtitle
             val titleMatches = matchesTitle(album, candidateTitle)
-            val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+            val artistMatches = if (artist.isNotBlank()) {
+                matchesArtist(artist, candidateArtist)
+            } else {
+                candidateArtist.isNotBlank() && album.length >= 6 && album.normalized() == candidateTitle.normalized()
+            }
             if (titleMatches && artistMatches) {
                 return@runCatching item.item.thumbnailUrl
             }
@@ -417,7 +511,11 @@ object OnlineArtworkRepository {
             val candidateTitle = item.song.title
             val candidateArtist = item.song.artist
             val titleMatches = matchesTitle(title, candidateTitle)
-            val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+            val artistMatches = if (artist.isNotBlank()) {
+                matchesArtist(artist, candidateArtist)
+            } else {
+                candidateArtist.isNotBlank() && title.length >= 6 && title.normalized() == candidateTitle.normalized()
+            }
             if (titleMatches && artistMatches) {
                 return@runCatching item.song.thumbnailUrl
             }
@@ -428,6 +526,7 @@ object OnlineArtworkRepository {
     /**
      * Saves discovered artwork as `cover.jpg` directly into the album's physical folder.
      * Guarded by user preference and directory safety checks to prevent gallery pollution.
+     * Note: Never writes `.nomedia` to user music folders as that suppresses MediaStore indexing of songs.
      */
     fun saveCoverToAlbumFolder(context: Context, song: Song, artworkUrl: String): Boolean {
         if (!AppSettings.saveAlbumCoverToFolder.value) return false
@@ -448,14 +547,6 @@ object OnlineArtworkRepository {
             fPath.endsWith("/movies")
         ) {
             return false
-        }
-
-        // Create .nomedia first before creating cover.jpg so gallery scanner ignores it
-        if (AppSettings.downloadCreateNomedia.value || AppSettings.noLocalAlbums.value) {
-            val nomedia = File(folder, ".nomedia")
-            if (!nomedia.exists()) {
-                runCatching { nomedia.createNewFile() }
-            }
         }
 
         val coverFile = File(folder, "cover.jpg")

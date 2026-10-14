@@ -168,35 +168,65 @@ object LocalMediaRepository {
         }
         if (missingArt.isEmpty()) return@withContext
 
-        val byAlbum = missingArt.groupBy { "${it.artist}:::${it.albumName ?: ""}" }
         val updates = mutableMapOf<String, String>()
 
-        for ((key, albumTracks) in byAlbum) {
-            val parts = key.split(":::")
-            val artist = parts.getOrNull(0).orEmpty()
-            val album = parts.getOrNull(1).orEmpty()
-
-            val foundArt = if (album.isNotBlank()) {
-                OnlineArtworkRepository.resolveAlbumArt(context, artist, album)
-            } else {
-                val first = albumTracks.firstOrNull()
-                if (first != null && first.title.isNotBlank()) {
-                    OnlineArtworkRepository.resolveSongArt(context, artist, first.title, null)
-                } else null
-            }
-
-            if (foundArt != null) {
-                if (AppSettings.saveAlbumCoverToFolder.value) {
-                    OnlineArtworkRepository.saveCoverToAlbumFolder(context, albumTracks, foundArt)
-                }
-                for (track in albumTracks) {
-                    updates[track.videoId] = foundArt
-                    track.localUri?.let { updates[it] = foundArt }
-                    track.localPath?.let { updates[it] = foundArt }
-                }
-            }
-            kotlinx.coroutines.delay(50)
+        // 1. Separate genuine albums from loose tracks / generic album singles
+        val (albumTracks, looseTracks) = missingArt.partition { track ->
+            val sanitized = OnlineArtworkRepository.sanitizeAlbum(track.albumName.orEmpty())
+            sanitized.isNotBlank()
         }
+
+        // 2. Process genuine albums (grouped by artist and album)
+        if (albumTracks.isNotEmpty()) {
+            val byAlbum = albumTracks.groupBy { track ->
+                val cleanArtist = OnlineArtworkRepository.sanitizeArtist(track.artist)
+                val cleanAlbum = OnlineArtworkRepository.sanitizeAlbum(track.albumName.orEmpty())
+                "$cleanArtist:::$cleanAlbum"
+            }
+
+            for ((key, tracksInAlbum) in byAlbum) {
+                val parts = key.split(":::")
+                val artist = parts.getOrNull(0).orEmpty()
+                val album = parts.getOrNull(1).orEmpty()
+                if (album.isBlank()) continue
+
+                val foundArt = OnlineArtworkRepository.resolveAlbumArt(context, artist, album)
+                if (foundArt != null) {
+                    if (AppSettings.saveAlbumCoverToFolder.value) {
+                        OnlineArtworkRepository.saveCoverToAlbumFolder(context, tracksInAlbum, foundArt)
+                    }
+                    for (track in tracksInAlbum) {
+                        updates[track.videoId] = foundArt
+                        track.localUri?.let { updates[it] = foundArt }
+                        track.localPath?.let { updates[it] = foundArt }
+                    }
+                }
+                kotlinx.coroutines.delay(50)
+            }
+        }
+
+        // 3. Process loose tracks individually so tracks NEVER hijack each other's artwork
+        if (looseTracks.isNotEmpty()) {
+            for (track in looseTracks) {
+                val cleanArtist = OnlineArtworkRepository.sanitizeArtist(track.artist)
+                val cleanTitle = OnlineArtworkRepository.sanitizeTitle(track.title)
+                if (cleanTitle.isNotBlank()) {
+                    val foundArt = OnlineArtworkRepository.resolveSongArt(context, cleanArtist, cleanTitle, null)
+                    if (foundArt != null) {
+                        if (AppSettings.saveAlbumCoverToFolder.value) {
+                            OnlineArtworkRepository.saveCoverToAlbumFolder(context, track, foundArt)
+                        }
+                        updates[track.videoId] = foundArt
+                        track.localUri?.let { updates[it] = foundArt }
+                        track.localPath?.let { updates[it] = foundArt }
+                    }
+                }
+                kotlinx.coroutines.delay(50)
+            }
+        }
+
+        // Flush any pending disk cache writes
+        OnlineArtworkRepository.flushDiskCache(context)
 
         if (updates.isNotEmpty()) {
             updateSongsArtwork(context, updates)

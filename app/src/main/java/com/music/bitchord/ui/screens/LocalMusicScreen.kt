@@ -836,29 +836,27 @@ private fun SongsTab(
                         modifier = Modifier,
                     )
                     if (onShuffle != null && songs.isNotEmpty()) {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-                            onClick = { onShuffle(songs) },
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f))
+                                .clickable { onShuffle(songs) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    imageVector = BitChordIcons.Shuffle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                                Text(
-                                    text = stringResource(R.string.shuffle),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
+                            Icon(
+                                imageVector = BitChordIcons.Shuffle,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Text(
+                                text = stringResource(R.string.shuffle),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
                         }
                     }
                 }
@@ -895,29 +893,27 @@ private fun SongsTab(
                         modifier = Modifier,
                     )
                     if (onShuffle != null && songs.isNotEmpty()) {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-                            onClick = { onShuffle(songs) },
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f))
+                                .clickable { onShuffle(songs) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    imageVector = BitChordIcons.Shuffle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                                Text(
-                                    text = stringResource(R.string.shuffle),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
+                            Icon(
+                                imageVector = BitChordIcons.Shuffle,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Text(
+                                text = stringResource(R.string.shuffle),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
                         }
                     }
                 }
@@ -2105,6 +2101,9 @@ private fun DrillDownSongList(
     val displayLabel = albumDrillDown?.title ?: label
     val displayArt = albumDrillDown?.thumbnailUrl ?: artworkUrl
     val displayIsArtist = albumDrillDown == null && isArtist
+    val hasMultipleDiscs = !displayIsArtist && remember(displaySongs) {
+        displaySongs.mapNotNull { it.discNumber }.filter { it > 0 }.distinct().size > 1
+    }
 
     // Albums grouped from this artist's songs — only needed for the artist view.
     val artistAlbums = remember(songs, isArtist) {
@@ -2317,9 +2316,6 @@ private fun DrillDownSongList(
                         onSongClick = onSongClick,
                         onShuffle = onShuffle,
                     )
-                }
-                val hasMultipleDiscs = !displayIsArtist && remember(displaySongs) {
-                    displaySongs.mapNotNull { it.discNumber }.filter { it > 0 }.distinct().size > 1
                 }
                 itemsIndexed(displaySongs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
                     val currentDisc = song.discNumber ?: 1

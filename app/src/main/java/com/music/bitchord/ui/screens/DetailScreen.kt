@@ -355,6 +355,9 @@ fun DetailScreen(
     // list. When no filter is active, matches contains the full running order
     // and plays the complete release/playlist from the tapped position.
     val queue = remember(matches) { matches.map { it.value } }
+    val hasMultipleDiscs = page.type == BrowseType.ALBUM && songSort == SongSort.DEFAULT && remember(matches) {
+        matches.mapNotNull { it.value.discNumber }.filter { it > 0 }.distinct().size > 1
+    }
     val suggested = remember(page.suggestedSongs, query) {
         page.suggestedSongs.matching(query).map { it.value }
     }
@@ -605,9 +608,6 @@ fun DetailScreen(
                     // already the largest thing on the page — Apple Music
                     // numbers those rows instead, and so does this.
                     val numbered = page.type == BrowseType.ALBUM
-                    val hasMultipleDiscs = numbered && songSort == SongSort.DEFAULT && remember(matches) {
-                        matches.mapNotNull { it.value.discNumber }.filter { it > 0 }.distinct().size > 1
-                    }
                     if (matches.isEmpty() && state.data.isNotEmpty()) {
                         item(key = "no-matches") {
                             MessageState(stringResource(R.string.nothing_matches, query))

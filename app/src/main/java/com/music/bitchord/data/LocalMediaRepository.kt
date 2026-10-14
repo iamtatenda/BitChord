@@ -11,7 +11,6 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
-import androidx.documentfile.provider.DocumentFile
 import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
@@ -27,7 +26,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -198,6 +196,12 @@ object LocalMediaRepository {
         if (!changed) return
         saveCachedLocalMusic(context, newSongs)
         runCatching { com.music.bitchord.ui.screens.LocalMusicDerivedCache.invalidate() }
+        updated.keys.forEach { key ->
+            LocalAudioCoverFetcher.invalidate(key, context)
+        }
+        runCatching {
+            coil3.SingletonImageLoader.get(context).memoryCache?.clear()
+        }
         liveDiscoveredSongs.value = newSongs
     }
 
@@ -1609,18 +1613,5 @@ object LocalMediaRepository {
             discNumber = discNumber,
             trackNumber = trackNumber,
         )
-    }
-
-    private fun buildSongFromDocument(
-        context: Context,
-        doc: DocumentFile,
-        folderArtUri: String? = null,
-    ): Song? {
-        val name = doc.name ?: return null
-        val resolvedPath = runCatching {
-            val docId = DocumentsContract.getDocumentId(doc.uri)
-            resolvePhysicalPath(docId)
-        }.getOrNull()
-        return buildSongFromSaf(context, doc.uri, name, doc.lastModified(), folderArtUri, resolvedPath)
     }
 }

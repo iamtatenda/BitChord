@@ -49,7 +49,6 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.luminance
 import com.music.bitchord.data.model.LibraryState
 import androidx.compose.material.icons.rounded.Close

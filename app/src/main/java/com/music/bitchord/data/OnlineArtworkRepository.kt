@@ -23,7 +23,6 @@ import java.util.Locale
  */
 object OnlineArtworkRepository {
 
-    private const val TAG = "OnlineArtwork"
     private const val DISK_FILE = "online_song_art_cache.json"
     private val memoryCache = LinkedHashMap<String, String>(1000, 0.75f, true)
     private val diskLock = Any()

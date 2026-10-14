@@ -92,7 +92,7 @@ import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.playback.StreamChoice
 import com.music.bitchord.ui.screens.CACHE_FOLDER_BROWSE_ID
 import com.music.bitchord.ui.screens.matchesSearch
-import android.util.Log
+import com.music.bitchord.data.DebugLog as Log
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -2980,6 +2980,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (browseId.startsWith("local:artist:")) {
+            val artistName = browseId.removePrefix("local:artist:")
+            val context = getApplication<Application>()
+            val allSongs = (_librarySongs.value as? UiState.Success)?.data ?: LocalMediaRepository.getLocalMusic(context)
+            val matched = allSongs.filter {
+                LocalMediaRepository.splitArtists(it.artist).any { a -> a.equals(artistName, ignoreCase = true) }
+            }
+            openLocalArtist(artistName, matched)
             return
         }
         val resolved = browseTypeOf(browseId, type)

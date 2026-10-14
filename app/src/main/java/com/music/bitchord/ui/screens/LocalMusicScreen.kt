@@ -2132,11 +2132,19 @@ private fun DrillDownSongList(
 
     LaunchedEffect(songs) {
         val current = albumDrillDown ?: return@LaunchedEffect
-        val updatedGroup = songs.filter { (it.albumName?.ifBlank { null } ?: "Singles & Other Tracks").equals(current.title, ignoreCase = true) }
+        val updatedGroup = songs.filter {
+            val cleaned = it.albumName?.let { name -> com.music.bitchord.data.LocalMediaRepository.cleanDiscSuffix(name) }
+            (cleaned?.ifBlank { null } ?: "Singles & Other Tracks").equals(current.title, ignoreCase = true)
+        }
         if (updatedGroup.isNotEmpty()) {
-            val art = updatedGroup.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
-                ?: updatedGroup.firstNotNullOfOrNull { it.thumbnailUrl } ?: current.thumbnailUrl
-            albumDrillDown = current.copy(thumbnailUrl = art, songs = updatedGroup)
+            val sortedGroup = updatedGroup.sortedWith(
+                compareBy<Song> { it.discNumber ?: 1 }
+                    .thenBy { it.trackNumber ?: Int.MAX_VALUE }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+            )
+            val art = sortedGroup.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
+                ?: sortedGroup.firstNotNullOfOrNull { it.thumbnailUrl } ?: current.thumbnailUrl
+            albumDrillDown = current.copy(thumbnailUrl = art, songs = sortedGroup)
         }
     }
 
@@ -2157,16 +2165,24 @@ private fun DrillDownSongList(
     val artistAlbums = remember(songs, isArtist) {
         if (!isArtist) emptyList()
         else songs
-            .groupBy { it.albumName?.ifBlank { null } ?: "Singles & Other Tracks" }
+            .groupBy {
+                val cleaned = it.albumName?.let { name -> com.music.bitchord.data.LocalMediaRepository.cleanDiscSuffix(name) }
+                cleaned?.ifBlank { null } ?: "Singles & Other Tracks"
+            }
             .map { (name, group) ->
-                val art = group.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
-                    ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
+                val sortedGroup = group.sortedWith(
+                    compareBy<Song> { it.discNumber ?: 1 }
+                        .thenBy { it.trackNumber ?: Int.MAX_VALUE }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+                )
+                val art = sortedGroup.firstOrNull { it.thumbnailUrl?.startsWith("audio:") == false }?.thumbnailUrl
+                    ?: sortedGroup.firstNotNullOfOrNull { it.thumbnailUrl }
                 AlbumEntry(
                     title = name,
-                    artist = group.firstOrNull()?.artist.orEmpty(),
+                    artist = sortedGroup.firstOrNull()?.artist.orEmpty(),
                     thumbnailUrl = art,
                     playlist = false,
-                    songs = group,
+                    songs = sortedGroup,
                     asked = false,
                     key = "artist-album:$name",
                 )

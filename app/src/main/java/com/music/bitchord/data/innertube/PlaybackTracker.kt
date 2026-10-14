@@ -73,6 +73,7 @@ object PlaybackTracker {
     val registeredPlays: StateFlow<Int> = _registeredPlays.asStateFlow()
 
     private val lock = Mutex()
+    private val queueFileLock = Mutex()
 
     @Volatile
     private var session: Session? = null
@@ -160,6 +161,45 @@ object PlaybackTracker {
         }
     }
 
+    private fun readQueueLocked(ctx: Context): MutableList<OfflinePlayRecord> {
+        val file = File(ctx.filesDir, QUEUE_FILE)
+        val list = mutableListOf<OfflinePlayRecord>()
+        if (!file.exists()) return list
+        val raw = file.readText(Charsets.UTF_8).trim()
+        if (raw.isBlank() || raw == "[]") return list
+        val arr = JSONArray(raw)
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            list.add(
+                OfflinePlayRecord(
+                    videoId = obj.optString("v").takeIf { it.isNotBlank() },
+                    title = obj.optString("t"),
+                    artist = obj.optString("a"),
+                    timestampMs = obj.optLong("ts"),
+                    durationSeconds = obj.optLong("d", 60L),
+                )
+            )
+        }
+        return list
+    }
+
+    private fun writeQueueLocked(ctx: Context, list: List<OfflinePlayRecord>) {
+        val file = File(ctx.filesDir, QUEUE_FILE)
+        val newArr = JSONArray()
+        for (rec in list) {
+            val obj = JSONObject()
+            rec.videoId?.let { obj.put("v", it) }
+            obj.put("t", rec.title)
+            obj.put("a", rec.artist)
+            obj.put("ts", rec.timestampMs)
+            obj.put("d", rec.durationSeconds)
+            newArr.put(obj)
+        }
+        val tmp = File(ctx.filesDir, "$QUEUE_FILE.tmp")
+        tmp.writeText(newArr.toString(), Charsets.UTF_8)
+        tmp.renameTo(file)
+    }
+
     /**
      * Queue a play that occurred while offline or failed due to network refusal.
      */
@@ -171,50 +211,21 @@ object PlaybackTracker {
     ) {
         val ctx = appContext ?: return
         scope.launch(Dispatchers.IO) {
-            runCatching {
-                val file = File(ctx.filesDir, QUEUE_FILE)
-                val list = mutableListOf<OfflinePlayRecord>()
-                if (file.exists()) {
-                    val raw = file.readText(Charsets.UTF_8).trim()
-                    if (raw.isNotBlank() && raw != "[]") {
-                        val arr = JSONArray(raw)
-                        for (i in 0 until arr.length()) {
-                            val obj = arr.getJSONObject(i)
-                            list.add(
-                                OfflinePlayRecord(
-                                    videoId = obj.optString("v").takeIf { it.isNotBlank() },
-                                    title = obj.optString("t"),
-                                    artist = obj.optString("a"),
-                                    timestampMs = obj.optLong("ts"),
-                                    durationSeconds = obj.optLong("d", 60L),
-                                )
-                            )
-                        }
+            queueFileLock.withLock {
+                runCatching {
+                    val list = readQueueLocked(ctx)
+                    val now = System.currentTimeMillis()
+                    val isRecentDuplicate = list.any {
+                        (it.videoId != null && it.videoId == videoId || (it.title == title && it.artist == artist)) &&
+                            now - it.timestampMs < 30_000L
                     }
+                    if (!isRecentDuplicate && (videoId != null || (title.isNotBlank() && artist.isNotBlank()))) {
+                        list.add(OfflinePlayRecord(videoId, title, artist, now, durationSeconds))
+                    }
+                    val trimmed = if (list.size > 100) list.takeLast(100) else list
+                    writeQueueLocked(ctx, trimmed)
+                    TrackLog.d(TAG, "Queued offline play for ${videoId ?: "$artist - $title"} (queue size: ${trimmed.size})")
                 }
-                val now = System.currentTimeMillis()
-                val isRecentDuplicate = list.any {
-                    (it.videoId != null && it.videoId == videoId || (it.title == title && it.artist == artist)) &&
-                        now - it.timestampMs < 30_000L
-                }
-                if (!isRecentDuplicate && (videoId != null || (title.isNotBlank() && artist.isNotBlank()))) {
-                    list.add(OfflinePlayRecord(videoId, title, artist, now, durationSeconds))
-                }
-                val trimmed = if (list.size > 100) list.takeLast(100) else list
-                val newArr = JSONArray()
-                for (rec in trimmed) {
-                    val obj = JSONObject()
-                    rec.videoId?.let { obj.put("v", it) }
-                    obj.put("t", rec.title)
-                    obj.put("a", rec.artist)
-                    obj.put("ts", rec.timestampMs)
-                    obj.put("d", rec.durationSeconds)
-                    newArr.put(obj)
-                }
-                val tmp = File(ctx.filesDir, "$QUEUE_FILE.tmp")
-                tmp.writeText(newArr.toString(), Charsets.UTF_8)
-                tmp.renameTo(file)
-                TrackLog.d(TAG, "Queued offline play for ${videoId ?: "$artist - $title"} (queue size: ${trimmed.size})")
             }
         }
     }
@@ -228,34 +239,13 @@ object PlaybackTracker {
         if (isSyncingOffline) return@withContext
         isSyncingOffline = true
         try {
-            val file = File(ctx.filesDir, QUEUE_FILE)
-            if (!file.exists()) return@withContext
-            val text = file.readText(Charsets.UTF_8).trim()
-            if (text.isBlank() || text == "[]") return@withContext
-            val arr = JSONArray(text)
-            val pending = mutableListOf<OfflinePlayRecord>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                pending.add(
-                    OfflinePlayRecord(
-                        videoId = obj.optString("v").takeIf { it.isNotBlank() },
-                        title = obj.optString("t"),
-                        artist = obj.optString("a"),
-                        timestampMs = obj.optLong("ts"),
-                        durationSeconds = obj.optLong("d", 60L),
-                    )
-                )
-            }
+            val pending = queueFileLock.withLock { readQueueLocked(ctx) }
             if (pending.isEmpty()) return@withContext
 
-            val remaining = mutableListOf<OfflinePlayRecord>()
             var syncedCount = 0
 
             for (record in pending) {
-                if (AppSettings.meteredConnection.value == null) {
-                    remaining.add(record)
-                    continue
-                }
+                if (AppSettings.meteredConnection.value == null) break
 
                 var vid = record.videoId
                 if (vid == null || !isEligibleVideoId(vid)) {
@@ -287,28 +277,30 @@ object PlaybackTracker {
 
                     if (success) {
                         syncedCount++
+                        queueFileLock.withLock {
+                            val current = readQueueLocked(ctx)
+                            current.removeAll {
+                                it.timestampMs == record.timestampMs &&
+                                    (it.videoId == record.videoId || (it.title == record.title && it.artist == record.artist))
+                            }
+                            writeQueueLocked(ctx, current)
+                        }
                         delay(600)
-                    } else {
-                        remaining.add(record)
                     }
                 } else {
-                    if (System.currentTimeMillis() - record.timestampMs < 7 * 86_400_000L) {
-                        remaining.add(record)
+                    if (System.currentTimeMillis() - record.timestampMs >= 7 * 86_400_000L) {
+                        queueFileLock.withLock {
+                            val current = readQueueLocked(ctx)
+                            current.removeAll {
+                                it.timestampMs == record.timestampMs &&
+                                    it.title == record.title &&
+                                    it.artist == record.artist
+                            }
+                            writeQueueLocked(ctx, current)
+                        }
                     }
                 }
             }
-
-            val newArr = JSONArray()
-            for (rec in remaining) {
-                val obj = JSONObject()
-                rec.videoId?.let { obj.put("v", it) }
-                obj.put("t", rec.title)
-                obj.put("a", rec.artist)
-                obj.put("ts", rec.timestampMs)
-                obj.put("d", rec.durationSeconds)
-                newArr.put(obj)
-            }
-            file.writeText(newArr.toString(), Charsets.UTF_8)
 
             if (syncedCount > 0) {
                 _registeredPlays.value += syncedCount

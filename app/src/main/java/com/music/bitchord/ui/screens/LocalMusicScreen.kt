@@ -472,6 +472,22 @@ fun LocalMusicScreen(
         drillDownIsArtist = false
     }
 
+    LaunchedEffect(songs) {
+        val label = drillDownLabel ?: return@LaunchedEffect
+        if (drillDownIsArtist) {
+            val updated = songs.filter { splitArtists(it.artist).any { a -> a.equals(label, ignoreCase = true) } }
+            if (updated.isNotEmpty()) drillDownSongs = updated
+        } else {
+            val updated = songs.filter { it.albumName?.equals(label, ignoreCase = true) == true }
+            if (updated.isNotEmpty()) {
+                drillDownSongs = updated
+                val newArt = updated.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+                    ?: updated.firstNotNullOfOrNull { it.thumbnailUrl }
+                if (newArt != null) drillDownArt = newArt
+            }
+        }
+    }
+
     BackHandler(enabled = selectingDownloads) {
         selectedDownloadIds = emptySet()
         selectedAlbumKeys = emptySet()
@@ -826,15 +842,26 @@ private fun SongsTab(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 0.dp, vertical = 6.dp),
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    SectionHeader(
-                        icon = Icons.Rounded.LibraryMusic,
-                        title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
-                        modifier = Modifier,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LibraryMusic,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     if (onShuffle != null && songs.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -883,15 +910,26 @@ private fun SongsTab(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
+                        .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    SectionHeader(
-                        icon = Icons.Rounded.LibraryMusic,
-                        title = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
-                        modifier = Modifier,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LibraryMusic,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = pluralStringResource(R.plurals.song_count_plural, songs.size, songs.size),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     if (onShuffle != null && songs.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -2092,6 +2130,16 @@ private fun DrillDownSongList(
     // the secondary album within artist) jump straight to the flat track list.
     var albumDrillDown by remember { mutableStateOf<AlbumEntry?>(null) }
 
+    LaunchedEffect(songs) {
+        val current = albumDrillDown ?: return@LaunchedEffect
+        val updatedGroup = songs.filter { (it.albumName?.ifBlank { null } ?: "Singles & Other Tracks").equals(current.title, ignoreCase = true) }
+        if (updatedGroup.isNotEmpty()) {
+            val art = updatedGroup.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+                ?: updatedGroup.firstNotNullOfOrNull { it.thumbnailUrl } ?: current.thumbnailUrl
+            albumDrillDown = current.copy(thumbnailUrl = art, songs = updatedGroup)
+        }
+    }
+
     // Back press from secondary album drill-down returns to the albums grid.
     BackHandler(enabled = albumDrillDown != null) { albumDrillDown = null }
 
@@ -2111,10 +2159,12 @@ private fun DrillDownSongList(
         else songs
             .groupBy { it.albumName?.ifBlank { null } ?: "Singles & Other Tracks" }
             .map { (name, group) ->
+                val art = group.firstOrNull { it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:") }?.thumbnailUrl
+                    ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
                 AlbumEntry(
                     title = name,
                     artist = group.firstOrNull()?.artist.orEmpty(),
-                    thumbnailUrl = group.firstNotNullOfOrNull { it.thumbnailUrl },
+                    thumbnailUrl = art,
                     playlist = false,
                     songs = group,
                     asked = false,
@@ -2710,10 +2760,10 @@ private fun LocalTab(
 private fun SectionHeader(
     icon: ImageVector,
     title: String,
-    modifier: Modifier = Modifier.padding(horizontal = PAGE_GUTTER, vertical = 14.dp),
+    modifier: Modifier = Modifier.fillMaxWidth().padding(horizontal = PAGE_GUTTER, vertical = 14.dp),
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

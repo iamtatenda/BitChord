@@ -297,6 +297,7 @@ object OnlineArtworkRepository {
         context: Context,
         artist: String,
         albumName: String,
+        forceRefresh: Boolean = false,
     ): String? = withContext(Dispatchers.IO) {
         loadDiskCache(context)
         val cleanArtist = sanitizeArtist(artist)
@@ -304,7 +305,9 @@ object OnlineArtworkRepository {
         if (cleanAlbum.isBlank()) return@withContext null
 
         val key = normalizeKey(cleanArtist, cleanAlbum)
-        synchronized(memoryCache) { memoryCache[key] }?.let { return@withContext it }
+        if (!forceRefresh) {
+            synchronized(memoryCache) { memoryCache[key] }?.let { return@withContext it }
+        }
 
         // 1. iTunes Album Search with strict candidate validation
         var art = fetchItunesAlbumArt(cleanArtist, cleanAlbum)
@@ -331,6 +334,7 @@ object OnlineArtworkRepository {
         artist: String,
         title: String,
         albumName: String? = null,
+        forceRefresh: Boolean = false,
     ): String? = withContext(Dispatchers.IO) {
         loadDiskCache(context)
         val cleanArtist = sanitizeArtist(artist)
@@ -339,14 +343,16 @@ object OnlineArtworkRepository {
 
         // If a verified album name is known, prioritize resolving the full album artwork
         if (cleanAlbum != null) {
-            val albumArt = resolveAlbumArt(context, cleanArtist, cleanAlbum)
+            val albumArt = resolveAlbumArt(context, cleanArtist, cleanAlbum, forceRefresh = forceRefresh)
             if (albumArt != null) return@withContext albumArt
         }
 
         val key = normalizeKey(cleanArtist, cleanTitle)
         if (key.isBlank()) return@withContext null
 
-        synchronized(memoryCache) { memoryCache[key] }?.let { return@withContext it }
+        if (!forceRefresh) {
+            synchronized(memoryCache) { memoryCache[key] }?.let { return@withContext it }
+        }
 
         // 1. iTunes Song Search with strict candidate validation
         var art = fetchItunesSongArt(cleanArtist, cleanTitle)
@@ -558,7 +564,12 @@ object OnlineArtworkRepository {
      * Guarded by user preference and directory safety checks to prevent gallery pollution.
      * Note: Never writes `.nomedia` to user music folders as that suppresses MediaStore indexing of songs.
      */
-    fun saveCoverToAlbumFolder(context: Context, song: Song, artworkUrl: String): Boolean {
+    fun saveCoverToAlbumFolder(
+        context: Context,
+        song: Song,
+        artworkUrl: String,
+        overwrite: Boolean = false,
+    ): Boolean {
         if (!AppSettings.saveAlbumCoverToFolder.value) return false
 
         val path = song.localPath ?: return false
@@ -582,7 +593,7 @@ object OnlineArtworkRepository {
         }
 
         val coverFile = File(folder, "cover.jpg")
-        if (coverFile.exists() && coverFile.length() > 0) return true
+        if (!overwrite && coverFile.exists() && coverFile.length() > 0) return true
 
         return runCatching {
             val req = Request.Builder().url(artworkUrl).build()
@@ -595,8 +606,13 @@ object OnlineArtworkRepository {
         }.getOrDefault(false)
     }
 
-    fun saveCoverToAlbumFolder(context: Context, songs: List<Song>, artworkUrl: String): Boolean {
+    fun saveCoverToAlbumFolder(
+        context: Context,
+        songs: List<Song>,
+        artworkUrl: String,
+        overwrite: Boolean = false,
+    ): Boolean {
         val firstWithPath = songs.firstOrNull { !it.localPath.isNullOrBlank() } ?: return false
-        return saveCoverToAlbumFolder(context, firstWithPath, artworkUrl)
+        return saveCoverToAlbumFolder(context, firstWithPath, artworkUrl, overwrite = overwrite)
     }
 }

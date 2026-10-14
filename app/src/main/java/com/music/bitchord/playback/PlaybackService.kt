@@ -2849,34 +2849,9 @@ class PlaybackService : MediaLibraryService() {
     private val matchedLocalVideoIdCache = ConcurrentHashMap<String, String>()
 
     private fun registerCurrentPlay() {
-        val mediaId = player?.currentMediaItem?.mediaId ?: return
-        if (PlaybackTracker.isEligibleVideoId(mediaId)) {
-            PlaybackTracker.onPlaying(mediaId)
-        } else {
-            val song = player?.currentMediaItem?.toSong() ?: return
-            if (song.artist.isNotBlank() && song.title.isNotBlank()) {
-                scope.launch(Dispatchers.IO) {
-                    val key = "${song.artist.lowercase()}:${song.title.lowercase()}"
-                    val cached = matchedLocalVideoIdCache[key]
-                    if (cached != null) {
-                        PlaybackTracker.onPlaying(cached)
-                        return@launch
-                    }
-                    val row = runCatching {
-                        YtMusicRepository.search("${song.artist} ${song.title}", SearchFilter.SONGS).getOrNull()?.firstOrNull()
-                    }.getOrNull()
-                    val videoId = when (row) {
-                        is SearchResult.TopTrack -> row.song.videoId
-                        is SearchResult.Track -> row.song.videoId
-                        else -> null
-                    }
-                    if (videoId != null && PlaybackTracker.isEligibleVideoId(videoId)) {
-                        matchedLocalVideoIdCache[key] = videoId
-                        PlaybackTracker.onPlaying(videoId)
-                    }
-                }
-            }
-        }
+        val song = player?.currentMediaItem?.toSong() ?: return
+        val mediaId = player?.currentMediaItem?.mediaId ?: song.videoId
+        PlaybackTracker.onPlaying(mediaId, song.title, song.artist)
     }
 
     /**

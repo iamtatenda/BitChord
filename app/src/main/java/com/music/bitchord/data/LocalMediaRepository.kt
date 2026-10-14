@@ -16,8 +16,14 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -80,8 +86,12 @@ object LocalMediaRepository {
     val indexedCount = MutableStateFlow(0)
     val liveDiscoveredSongs = MutableStateFlow<List<Song>>(emptyList())
 
+    private val scanScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var activeScanJob: Deferred<List<Song>>? = null
+    private val scanMutex = Mutex()
+
     @Volatile
-    private var cachedSongsMemory: List<Song>? = null
+    var cachedSongsMemory: List<Song>? = null
 
     fun hasCachedLocalMusic(context: Context): Boolean {
         if (!cachedSongsMemory.isNullOrEmpty()) return true
@@ -122,7 +132,34 @@ object LocalMediaRepository {
         }
     }
 
+    private const val LIKED_SONGS_PREFS = "local_liked_songs"
+    private const val KEY_LIKED_SET = "liked_ids"
+
+    fun isLocalTrackLiked(context: Context, videoId: String): Boolean {
+        val prefs = context.getSharedPreferences(LIKED_SONGS_PREFS, Context.MODE_PRIVATE)
+        val set = prefs.getStringSet(KEY_LIKED_SET, emptySet()) ?: emptySet()
+        return videoId in set
+    }
+
+    fun getLikedTrackIds(context: Context): Set<String> {
+        val prefs = context.getSharedPreferences(LIKED_SONGS_PREFS, Context.MODE_PRIVATE)
+        return prefs.getStringSet(KEY_LIKED_SET, emptySet()) ?: emptySet()
+    }
+
+    fun setLocalTrackLiked(context: Context, videoId: String, status: LikeStatus) {
+        val prefs = context.getSharedPreferences(LIKED_SONGS_PREFS, Context.MODE_PRIVATE)
+        val set = prefs.getStringSet(KEY_LIKED_SET, emptySet())?.toMutableSet() ?: mutableSetOf()
+        if (status == LikeStatus.LIKE) {
+            set.add(videoId)
+        } else {
+            set.remove(videoId)
+        }
+        prefs.edit().putStringSet(KEY_LIKED_SET, set).apply()
+    }
+
     fun clearCache(context: Context) {
+        activeScanJob?.cancel()
+        activeScanJob = null
         cachedSongsMemory = null
         runCatching {
             val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
@@ -412,9 +449,30 @@ object LocalMediaRepository {
      * Executes the comprehensive indexing scan across MediaStore volumes,
      * physical filesystem paths and SAF trees, deduplicating and caching the result to disk.
      */
-    suspend fun scanAndCacheLocalMusic(context: Context): List<Song> = withContext(Dispatchers.IO) {
-        if (!hasStoragePermission(context)) return@withContext emptyList()
+    /**
+     * Executes the comprehensive indexing scan across MediaStore volumes,
+     * physical filesystem paths and SAF trees, deduplicating and caching the result to disk.
+     * Guaranteed to persist in the background even if callers leave the local music screen.
+     */
+    suspend fun scanAndCacheLocalMusic(context: Context): List<Song> {
+        if (!hasStoragePermission(context)) return emptyList()
 
+        val job = scanMutex.withLock {
+            val existing = activeScanJob
+            if (existing != null && existing.isActive) {
+                return@withLock existing
+            }
+            val appContext = context.applicationContext
+            val newJob = scanScope.async {
+                performScanAndCache(appContext)
+            }
+            activeScanJob = newJob
+            newJob
+        }
+        return job.await()
+    }
+
+    private suspend fun performScanAndCache(context: Context): List<Song> = withContext(Dispatchers.IO) {
         isIndexing.value = true
         indexedCount.value = 0
         liveDiscoveredSongs.value = emptyList()
@@ -686,9 +744,11 @@ object LocalMediaRepository {
         val selectedPath = selectedFolderPath(folderFilter)
         val targetFolders = mutableListOf<File>()
 
-        if (!selectedPath.isNullOrBlank()) {
-            val f = File(selectedPath)
-            if (f.exists() && f.isDirectory) targetFolders.add(f)
+        if (folderFilter.isNotBlank()) {
+            if (!selectedPath.isNullOrBlank()) {
+                val f = File(selectedPath)
+                if (f.exists() && f.isDirectory) targetFolders.add(f)
+            }
         } else {
             val internalStorage = File("/storage/emulated/0")
             if (internalStorage.exists() && internalStorage.isDirectory) {
@@ -807,10 +867,12 @@ object LocalMediaRepository {
                         val normPath = resolvedPath?.normalizedPath()
                         if (normPath != null && seenPaths.contains(normPath)) continue
 
+                        if (filterNonMusic && !isEligibleLocalMusic(0, name, resolvedPath)) continue
+
                         val docUri = DocumentsContract.buildDocumentUriUsingTree(parsedUri, docId)
                         val uriStr = docUri.toString()
                         if (!seenUris.contains(uriStr)) {
-                            val song = buildSongFromSaf(docUri, name, mod, folderCoverUri, resolvedPath)
+                            val song = buildSongFromSaf(context, docUri, name, mod, folderCoverUri, resolvedPath, filterNonMusic)
                             if (song != null) {
                                 seenUris.add(uriStr)
                                 if (normPath != null) seenPaths.add(normPath)
@@ -830,7 +892,31 @@ object LocalMediaRepository {
         }
 
         notifyProgress(force = true)
-        val deduplicated = deduplicateTracks(songs, AppSettings.preventDuplicateTracks.value)
+
+        // Propagate album artwork across the collection so tracks in an album inherit the cover
+        val albumCoverMap = mutableMapOf<String, String>()
+        for (song in songs) {
+            val album = song.albumName?.trim()
+            val art = song.thumbnailUrl
+            if (!album.isNullOrBlank() && !art.isNullOrBlank() && !art.startsWith("audio:")) {
+                albumCoverMap.putIfAbsent(album.lowercase(Locale.ROOT), art)
+            }
+        }
+        val enrichedSongs = if (albumCoverMap.isNotEmpty()) {
+            songs.map { song ->
+                val album = song.albumName?.trim()?.lowercase(Locale.ROOT)
+                val inherited = if (album != null) albumCoverMap[album] else null
+                if (inherited != null && (song.thumbnailUrl == null || song.thumbnailUrl.startsWith("audio:"))) {
+                    song.copy(thumbnailUrl = inherited)
+                } else {
+                    song
+                }
+            }
+        } else {
+            songs
+        }
+
+        val deduplicated = deduplicateTracks(enrichedSongs, AppSettings.preventDuplicateTracks.value)
         saveCachedLocalMusic(context, deduplicated)
         indexedCount.value = deduplicated.size
         liveDiscoveredSongs.value = deduplicated
@@ -847,6 +933,11 @@ object LocalMediaRepository {
         deduplicated
     } finally {
         isIndexing.value = false
+        scanMutex.withLock {
+            if (activeScanJob?.isActive != true) {
+                activeScanJob = null
+            }
+        }
     }
 }
 
@@ -979,19 +1070,38 @@ object LocalMediaRepository {
 
         // 2. Relative path match (e.g. MediaStore.Audio.Media.RELATIVE_PATH = "Music/...")
         if (!relativePath.isNullOrBlank()) {
-            val normRel = relativePath.trim('/').lowercase(Locale.ROOT)
-            val folderRel = folder.relativePath?.trim('/')?.lowercase(Locale.ROOT)
+            val normRel = relativePath.replace('\\', '/').trim('/').lowercase(Locale.ROOT)
+            val folderRel = folder.relativePath?.replace('\\', '/')?.trim('/')?.lowercase(Locale.ROOT)
             if (folderRel != null && (normRel == folderRel || normRel.startsWith("$folderRel/"))) {
                 return true
-            }
-            val targetLabel = folder.label.trim().lowercase(Locale.ROOT)
-            if (targetLabel.isNotBlank()) {
-                val segments = normRel.split('/')
-                if (segments.any { it == targetLabel }) return true
             }
         }
 
         return false
+    }
+
+    /**
+     * Checks if a song matching the given artist and title already exists in the local library.
+     */
+    fun hasMatchingTrack(artist: String?, title: String?): Boolean {
+        if (title.isNullOrBlank()) return false
+        val cleanTitle = OnlineArtworkRepository.sanitizeTitle(title)
+        val cleanArtist = artist?.let { OnlineArtworkRepository.sanitizeArtist(it) }.orEmpty()
+        val tNorm = cleanTitle.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+        val aNorm = cleanArtist.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+        if (tNorm.isEmpty()) return false
+
+        val songs = cachedSongsMemory ?: return false
+        return songs.any { localSong ->
+            val localT = OnlineArtworkRepository.sanitizeTitle(localSong.title).filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+            if (localT == tNorm) {
+                if (aNorm.isEmpty()) true
+                else {
+                    val localA = OnlineArtworkRepository.sanitizeArtist(localSong.artist).filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+                    localA.isEmpty() || localA == aNorm || localA.contains(aNorm) || aNorm.contains(localA)
+                }
+            } else false
+        }
     }
 
     private data class SelectedFolder(
@@ -1076,7 +1186,7 @@ object LocalMediaRepository {
         val normalizedPath = path
             ?.replace('\\', '/')
             ?.lowercase(Locale.ROOT)
-            ?: return true
+            ?: "/${displayName.lowercase(Locale.ROOT)}"
         return nonMusicPathSegments.none(normalizedPath::contains)
     }
 
@@ -1213,6 +1323,17 @@ object LocalMediaRepository {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
 
+        if (AppSettings.filterNonMusicAudio.value && file.length() < 50_000L) {
+            val durationMs = runCatching {
+                val mr = MediaMetadataRetriever()
+                mr.setDataSource(path)
+                val d = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                mr.release()
+                d
+            }.getOrDefault(0L)
+            if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) return null
+        }
+
         val parent = file.parentFile
         val parsed = parseMetadataFromPath(name, parent)
 
@@ -1243,14 +1364,31 @@ object LocalMediaRepository {
     }
 
     private fun buildSongFromSaf(
+        context: Context,
         uri: Uri,
         name: String,
         lastModifiedMs: Long,
         folderArtUri: String? = null,
         physicalPath: String? = null,
+        filterNonMusic: Boolean = false,
     ): Song? {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
+
+        if (filterNonMusic) {
+            val durationMs = runCatching {
+                val mr = MediaMetadataRetriever()
+                if (physicalPath != null && File(physicalPath).exists()) {
+                    mr.setDataSource(physicalPath)
+                } else {
+                    mr.setDataSource(context, uri)
+                }
+                val d = mr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                mr.release()
+                d
+            }.getOrDefault(0L)
+            if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) return null
+        }
 
         val parsed = parseMetadataFromPath(name, physicalPath?.let { File(it).parentFile })
         val modified = lastModifiedMs.takeIf { it > 0 }?.div(1000)

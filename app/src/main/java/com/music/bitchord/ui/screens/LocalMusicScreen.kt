@@ -1275,12 +1275,24 @@ private fun albumEntries(
             // there is no row to draw for "no album" — those are the Songs tab's
             // and nothing else's.
             if (name == null || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
+            val albumCover = group.firstOrNull {
+                it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:")
+            }?.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
+
+            val updatedSongs = if (albumCover != null) {
+                group.map { s ->
+                    if (s.thumbnailUrl == null || s.thumbnailUrl.startsWith("audio:")) {
+                        s.copy(thumbnailUrl = albumCover)
+                    } else s
+                }
+            } else group
+
             AlbumEntry(
                 title = name,
                 artist = group.firstOrNull()?.artist.orEmpty(),
-                thumbnailUrl = group.firstNotNullOfOrNull { it.thumbnailUrl },
+                thumbnailUrl = albumCover,
                 playlist = false,
-                songs = group,
+                songs = updatedSongs,
                 asked = false,
                 key = "tagged:$name",
             )

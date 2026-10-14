@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.LibraryViewType
 import com.music.bitchord.download.Downloads
@@ -30,5 +31,10 @@ object AndroidAppUiHost : AppUiHost {
             }
             allIds
         }
+    }
+
+    override fun isTrackDownloaded(song: Song): Boolean {
+        if (song.videoId in Downloads.saved.value) return true
+        return LocalMediaRepository.hasMatchingTrack(song.artist, song.title)
     }
 }

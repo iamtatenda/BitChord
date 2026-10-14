@@ -92,9 +92,12 @@ import com.music.bitchord.playback.AudioCache
 import com.music.bitchord.playback.StreamChoice
 import com.music.bitchord.ui.screens.CACHE_FOLDER_BROWSE_ID
 import com.music.bitchord.ui.screens.matchesSearch
+import android.util.Log
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+
+private const val TAG = "BitChord"
 
 /** What the Search tab searches: YouTube Music, or the Local Music folder on this device. */
 enum class SearchSource { YOUTUBE, LIBRARY }
@@ -635,10 +638,46 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * registered, and people tap again.
      */
     fun setLike(videoId: String, status: LikeStatus) {
-        if (!requireSignIn()) return
+        val isLocal = videoId.startsWith("content://") || videoId.startsWith("file://") ||
+            videoId.startsWith("audio:") || videoId.startsWith("local:")
         val previous = likeStatusOf(videoId)
         if (previous == status) return
+
         LikeState.set(videoId, status)
+        if (isLocal) {
+            val context = getApplication<Application>()
+            LocalMediaRepository.setLocalTrackLiked(context, videoId, status)
+            if (_signedIn.value) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val localSongs = LocalMediaRepository.cachedSongsMemory ?: LocalMediaRepository.getCachedLocalMusic(context)
+                    val song = localSongs.firstOrNull { it.videoId == videoId || it.localUri == videoId || it.localPath == videoId }
+                        ?: Downloads.getDownloadedSongs(context).firstOrNull { it.videoId == videoId || it.localUri == videoId }
+                    if (song != null) {
+                        val cleanArtist = OnlineArtworkRepository.sanitizeArtist(song.artist)
+                        val cleanTitle = OnlineArtworkRepository.sanitizeTitle(song.title)
+                        val query = "$cleanArtist $cleanTitle".trim()
+                        if (query.isNotBlank()) {
+                            val match = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()?.firstOrNull()
+                            if (match != null) {
+                                YtMusicRepository.rate(match.videoId, status).fold(
+                                    onSuccess = {
+                                        LikeState.set(match.videoId, status)
+                                        libraryStale = true
+                                        if (status != LikeStatus.LIKE) dropFromLikedLists(match.videoId)
+                                    },
+                                    onFailure = {
+                                        Log.w(TAG, "Failed syncing local like to YouTube: ${it.message}")
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        if (!requireSignIn()) return
         viewModelScope.launch {
             YtMusicRepository.rate(videoId, status).fold(
                 onSuccess = {
@@ -2675,6 +2714,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             (p.title == title || p.browseId == "local:album:$albumKey" || p.browseId == "local:album:$title:$artist")
                         ) {
                             p.copy(thumbnailUrl = art, songs = UiState.Success(updatedSongs))
+                        } else p
+                    }
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.album_art_updated),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.album_art_not_found),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Resolves and updates artwork for an individual offline song.
+     */
+    fun enhanceSongArtwork(song: Song) {
+        val context = getApplication<Application>()
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.enhancing_album_art),
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val cleanArtist = OnlineArtworkRepository.sanitizeArtist(song.artist)
+            val cleanTitle = OnlineArtworkRepository.sanitizeTitle(song.title)
+            val cleanAlbum = song.albumName?.let { OnlineArtworkRepository.sanitizeAlbum(it) }
+
+            val art = OnlineArtworkRepository.resolveSongArt(context, cleanArtist, cleanTitle, cleanAlbum)
+                ?: (if (!cleanAlbum.isNullOrBlank()) OnlineArtworkRepository.resolveAlbumArt(context, cleanArtist, cleanAlbum) else null)
+
+            if (art != null) {
+                if (AppSettings.saveAlbumCoverToFolder.value) {
+                    OnlineArtworkRepository.saveCoverToAlbumFolder(context, song, art)
+                }
+                val updates = mutableMapOf<String, String>()
+                updates[song.videoId] = art
+                song.localUri?.let { updates[it] = art }
+                song.localPath?.let { updates[it] = art }
+                LocalMediaRepository.updateSongsArtwork(context, updates)
+
+                withContext(Dispatchers.Main) {
+                    _detailStack.value = _detailStack.value.map { p ->
+                        val songs = (p.songs as? UiState.Success)?.data ?: return@map p
+                        if (songs.any { it.videoId == song.videoId || it.localUri == song.localUri }) {
+                            p.copy(songs = UiState.Success(songs.map {
+                                if (it.videoId == song.videoId || it.localUri == song.localUri) it.copy(thumbnailUrl = art) else it
+                            }))
                         } else p
                     }
                     android.widget.Toast.makeText(

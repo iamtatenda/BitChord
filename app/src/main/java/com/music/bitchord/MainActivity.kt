@@ -860,6 +860,12 @@ private fun BitChordApp(
             viewModel.reloadLocalDetail(open)
         }
     }
+    LaunchedEffect(Unit) {
+        val liked = LocalMediaRepository.getLikedTrackIds(context)
+        if (liked.isNotEmpty()) {
+            LikeState.seedLiked(liked)
+        }
+    }
     LaunchedEffect(localMusicFolderUri, filterNonMusicAudio, preventDuplicateTracks) {
         viewModel.loadLibrarySongs()
         if (detail?.browseId == "local:all") {
@@ -4268,6 +4274,12 @@ private fun BitChordApp(
                 onOpenArtist = { id ->
                     openPage(id, song.artist, context.getString(R.string.artist), BrowseType.ARTIST)
                 },
+                onEnhanceArtwork = if (song.localUri != null) {
+                    {
+                        songActions = null
+                        viewModel.enhanceSongArtwork(song)
+                    }
+                } else null,
                 // Only the player's copy of a track is ever missing these
                 // and backfilling — a row opened from a list already has
                 // whatever ids it's ever going to have.

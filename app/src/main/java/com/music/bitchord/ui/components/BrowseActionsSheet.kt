@@ -47,6 +47,7 @@ import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.UserPlaylist
 import com.music.bitchord.data.model.artworkAt
+import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.download.DownloadState
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.ui.icons.BitChordIcons
@@ -253,8 +254,9 @@ fun BrowseActionsSheet(
                 // as downloaded once every one of its tracks is in the saved set,
                 // not from any record of the release itself. Empty for a card whose
                 // page was never opened, which is not an answer either way.
-                val ids = remember(target.songs) { target.songs.mapTo(HashSet()) { it.videoId } }
-                val downloaded = !waiting && ids.isNotEmpty() && ids.all { it in saved }
+                val downloaded = !waiting && target.songs.isNotEmpty() && target.songs.all { s ->
+                    s.videoId in saved || LocalMediaRepository.hasMatchingTrack(s.artist, s.title)
+                }
                 ActionRow(
                     icon = when {
                         waiting -> BitChordIcons.Clock

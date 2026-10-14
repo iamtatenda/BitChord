@@ -120,8 +120,11 @@ import com.music.bitchord.data.discord.discordAudioQualityLine
 import com.music.bitchord.data.innertube.PlaybackTracker
 import com.music.bitchord.data.stats.ListeningRecorder
 import com.music.bitchord.data.innertube.PlayerClient
+import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.OnlineArtworkRepository
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.LikeStatus
+import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.scrobbling.ListenBrainzManager
@@ -2655,6 +2658,29 @@ class PlaybackService : MediaLibraryService() {
         // the optimistic state with YouTube in the background.
         LikeState.set(videoId, target)
         refreshCustomLayouts()
+
+        val isLocal = videoId.startsWith("content://") || videoId.startsWith("file://") ||
+            videoId.startsWith("audio:") || videoId.startsWith("local:")
+        if (isLocal) {
+            LocalMediaRepository.setLocalTrackLiked(this, videoId, target)
+            val current = player?.currentMediaItem?.toSong()
+            if (current != null) {
+                favoriteActionJob = scope.launch(Dispatchers.IO) {
+                    val cleanArtist = OnlineArtworkRepository.sanitizeArtist(current.artist)
+                    val cleanTitle = OnlineArtworkRepository.sanitizeTitle(current.title)
+                    val query = "$cleanArtist $cleanTitle".trim()
+                    if (query.isNotBlank()) {
+                        val match = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()?.firstOrNull()
+                        if (match != null) {
+                            YtMusicRepository.rate(match.videoId, target)
+                                .onSuccess { LikeState.set(match.videoId, target) }
+                        }
+                    }
+                }
+            }
+            return
+        }
+
         favoriteActionJob = scope.launch {
             YtMusicRepository.rate(videoId, target)
                 .onFailure {

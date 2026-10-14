@@ -866,7 +866,7 @@ private fun SongsTab(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                                 .clickable { onShuffle(songs) }
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -876,19 +876,23 @@ private fun SongsTab(
                                 imageVector = BitChordIcons.Shuffle,
                                 contentDescription = null,
                                 modifier = Modifier.size(15.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
                                 text = stringResource(R.string.shuffle),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                 }
             }
-            itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
+            itemsIndexed(
+                items = songs,
+                key = { _, song -> song.localUri ?: song.localPath ?: song.videoId },
+                contentType = { _, _ -> "song_grid" },
+            ) { index, song ->
                 SongGridCard(
                     song = song,
                     selected = song.videoId in selectedIds,
@@ -934,7 +938,7 @@ private fun SongsTab(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                                 .clickable { onShuffle(songs) }
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -944,19 +948,23 @@ private fun SongsTab(
                                 imageVector = BitChordIcons.Shuffle,
                                 contentDescription = null,
                                 modifier = Modifier.size(15.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
                                 text = stringResource(R.string.shuffle),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                 }
             }
-            itemsIndexed(songs, key = { _, song -> song.localUri ?: song.localPath ?: song.videoId }) { index, song ->
+            itemsIndexed(
+                items = songs,
+                key = { _, song -> song.localUri ?: song.localPath ?: song.videoId },
+                contentType = { _, _ -> "song_row" },
+            ) { index, song ->
                 SongRow(
                     song = song,
                     selected = song.videoId in selectedIds,
@@ -964,6 +972,7 @@ private fun SongsTab(
                     isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
                     searchPlayingStyle = true,
                     activeTint = PlayingAccent,
+                    downloadedTint = null,
                     onClick = { onSongClick(songs, index) },
                     onLongPress = { onSongLongPress(song) },
                     onMore = onSongMore?.let { more -> { more(song) } },
@@ -2408,6 +2417,7 @@ private fun DrillDownSongList(
                         searchPlayingStyle = true,
                         activeTint = PlayingAccent,
                         trackNumber = song.trackNumber ?: (index + 1),
+                        downloadedTint = null,
                         onClick = { onSongClick(displaySongs, index) },
                         onLongPress = { onSongLongPress(song) },
                         onMore = onSongMore?.let { more -> { more(song) } },

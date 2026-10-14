@@ -34,6 +34,7 @@ object AndroidAppUiHost : AppUiHost {
     }
 
     override fun isTrackDownloaded(song: Song): Boolean {
+        if (song.localUri != null || song.localPath != null || song.videoId.startsWith("local:")) return true
         if (song.videoId in Downloads.saved.value) return true
         return LocalMediaRepository.hasMatchingTrack(song.artist, song.title)
     }

@@ -97,6 +97,24 @@ object LocalMediaRepository {
 
     @Volatile
     var cachedSongsMemory: List<Song>? = null
+    private val matchingTitleToArtistsMap = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
+    private fun rebuildMatchingIndex(songs: List<Song>?) {
+        matchingTitleToArtistsMap.clear()
+        if (songs.isNullOrEmpty()) return
+        val map = HashMap<String, MutableList<String>>()
+        for (s in songs) {
+            val cleanTitle = OnlineArtworkRepository.sanitizeTitle(s.title)
+            val tNorm = cleanTitle.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+            if (tNorm.isNotEmpty()) {
+                val cleanArtist = OnlineArtworkRepository.sanitizeArtist(s.artist)
+                val aNorm = cleanArtist.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+                val list = map.getOrPut(tNorm) { mutableListOf() }
+                if (aNorm !in list) list.add(aNorm)
+            }
+        }
+        matchingTitleToArtistsMap.putAll(map)
+    }
 
     fun hasCachedLocalMusic(context: Context): Boolean {
         if (!cachedSongsMemory.isNullOrEmpty()) return true
@@ -113,6 +131,7 @@ object LocalMediaRepository {
             val cached = json.decodeFromString<List<CachedLocalSong>>(text)
             val mapped = cached.map { it.toSong() }
             cachedSongsMemory = mapped
+            rebuildMatchingIndex(mapped)
             mapped
         }.getOrElse { err ->
             Log.w(TAG, "Failed reading $CACHE_FILE_NAME: ${err.message}")
@@ -122,6 +141,7 @@ object LocalMediaRepository {
 
     fun saveCachedLocalMusic(context: Context, songs: List<Song>) {
         cachedSongsMemory = songs
+        rebuildMatchingIndex(songs)
         runCatching {
             val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
             val tmpFile = File(context.filesDir, "$CACHE_FILE_NAME.tmp")
@@ -166,6 +186,7 @@ object LocalMediaRepository {
         activeScanJob?.cancel()
         activeScanJob = null
         cachedSongsMemory = null
+        rebuildMatchingIndex(null)
         runCatching {
             val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
             if (cacheFile.exists()) cacheFile.delete()
@@ -1166,21 +1187,19 @@ object LocalMediaRepository {
     fun hasMatchingTrack(artist: String?, title: String?): Boolean {
         if (title.isNullOrBlank()) return false
         val cleanTitle = OnlineArtworkRepository.sanitizeTitle(title)
-        val cleanArtist = artist?.let { OnlineArtworkRepository.sanitizeArtist(it) }.orEmpty()
         val tNorm = cleanTitle.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
-        val aNorm = cleanArtist.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
         if (tNorm.isEmpty()) return false
 
-        val songs = cachedSongsMemory ?: return false
-        return songs.any { localSong ->
-            val localT = OnlineArtworkRepository.sanitizeTitle(localSong.title).filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
-            if (localT == tNorm) {
-                if (aNorm.isEmpty()) true
-                else {
-                    val localA = OnlineArtworkRepository.sanitizeArtist(localSong.artist).filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
-                    localA.isEmpty() || localA == aNorm || localA.contains(aNorm) || aNorm.contains(localA)
-                }
-            } else false
+        if (matchingTitleToArtistsMap.isEmpty() && !cachedSongsMemory.isNullOrEmpty()) {
+            rebuildMatchingIndex(cachedSongsMemory)
+        }
+
+        val artists = matchingTitleToArtistsMap[tNorm] ?: return false
+        val cleanArtist = artist?.let { OnlineArtworkRepository.sanitizeArtist(it) }.orEmpty()
+        val aNorm = cleanArtist.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+        if (aNorm.isEmpty()) return true
+        return artists.any { localA ->
+            localA.isEmpty() || localA == aNorm || localA.contains(aNorm) || aNorm.contains(localA)
         }
     }
 

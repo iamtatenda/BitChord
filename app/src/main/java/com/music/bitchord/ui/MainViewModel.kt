@@ -658,12 +658,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         val query = "$cleanArtist $cleanTitle".trim()
                         if (query.isNotBlank()) {
                             val match = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()?.firstOrNull()
-                            if (match != null) {
-                                YtMusicRepository.rate(match.videoId, status).fold(
+                            val matchedSong = (match as? SearchResult.Track)?.song ?: (match as? SearchResult.TopTrack)?.song
+                            if (matchedSong != null) {
+                                val ytid = matchedSong.videoId
+                                YtMusicRepository.rate(ytid, status).fold(
                                     onSuccess = {
-                                        LikeState.set(match.videoId, status)
+                                        LikeState.set(ytid, status)
                                         libraryStale = true
-                                        if (status != LikeStatus.LIKE) dropFromLikedLists(match.videoId)
+                                        if (status != LikeStatus.LIKE) dropFromLikedLists(ytid)
                                     },
                                     onFailure = {
                                         Log.w(TAG, "Failed syncing local like to YouTube: ${it.message}")

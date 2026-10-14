@@ -120,11 +120,9 @@ import com.music.bitchord.data.discord.discordAudioQualityLine
 import com.music.bitchord.data.innertube.PlaybackTracker
 import com.music.bitchord.data.stats.ListeningRecorder
 import com.music.bitchord.data.innertube.PlayerClient
-import com.music.bitchord.data.LocalMediaRepository
 import com.music.bitchord.data.OnlineArtworkRepository
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.LikeStatus
-import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.scrobbling.ListenBrainzManager
@@ -2671,9 +2669,10 @@ class PlaybackService : MediaLibraryService() {
                     val query = "$cleanArtist $cleanTitle".trim()
                     if (query.isNotBlank()) {
                         val match = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()?.firstOrNull()
-                        if (match != null) {
-                            YtMusicRepository.rate(match.videoId, target)
-                                .onSuccess { LikeState.set(match.videoId, target) }
+                        val matchedSong = (match as? SearchResult.Track)?.song ?: (match as? SearchResult.TopTrack)?.song
+                        if (matchedSong != null) {
+                            YtMusicRepository.rate(matchedSong.videoId, target)
+                                .onSuccess { LikeState.set(matchedSong.videoId, target) }
                         }
                     }
                 }

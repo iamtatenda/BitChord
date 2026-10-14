@@ -1276,12 +1276,14 @@ private fun albumEntries(
             // and nothing else's.
             if (name == null || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
             val albumCover = group.firstOrNull {
-                it.thumbnailUrl != null && !it.thumbnailUrl.startsWith("audio:")
+                val thumb = it.thumbnailUrl
+                thumb != null && !thumb.startsWith("audio:")
             }?.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
 
             val updatedSongs = if (albumCover != null) {
                 group.map { s ->
-                    if (s.thumbnailUrl == null || s.thumbnailUrl.startsWith("audio:")) {
+                    val thumb = s.thumbnailUrl
+                    if (thumb == null || thumb.startsWith("audio:")) {
                         s.copy(thumbnailUrl = albumCover)
                     } else s
                 }

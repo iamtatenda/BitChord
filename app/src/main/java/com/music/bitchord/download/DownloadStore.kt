@@ -573,9 +573,7 @@ object DownloadStore {
             }.getOrDefault(false)
 
             if (written) {
-                if (!fileName.startsWith(".") && fileName != "cover.jpg") {
-                    MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
-                }
+                // Never scan companion images into MediaStore to prevent gallery pollution
                 return
             }
 
@@ -611,9 +609,12 @@ object DownloadStore {
                     return
                 }
 
+                val isImage = fileName.endsWith(".jpg", ignoreCase = true) || fileName.endsWith(".png", ignoreCase = true)
+                val safeMime = if (isImage) "application/octet-stream" else mimeType
+
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.MIME_TYPE, safeMime)
                     put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
@@ -627,6 +628,49 @@ object DownloadStore {
                 }
             }
         }.onFailure { Log.w(TAG, "Companion write non-fatal failure for $fileName: ${it.message}") }
+    }
+
+    /**
+     * Purges unwanted companion image entries from Android's MediaStore that were
+     * accidentally scanned into the user's Gallery app, and ensures .nomedia is present.
+     */
+    fun cleanupGalleryImages(context: Context) {
+        runCatching {
+            val base = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER)
+            if (base.exists() && base.isDirectory) {
+                val nomedia = File(base, ".nomedia")
+                if (!nomedia.exists()) runCatching { nomedia.createNewFile() }
+                base.walkTopDown().maxDepth(4).forEach { f ->
+                    if (f.isDirectory) {
+                        val subNomedia = File(f, ".nomedia")
+                        if (!subNomedia.exists()) runCatching { subNomedia.createNewFile() }
+                    } else if (f.isFile && (f.name.endsWith(".jpg", ignoreCase = true) || f.name.endsWith(".png", ignoreCase = true))) {
+                        // Delete loose track cover images that flooded the folder unless explicitly enabled
+                        if (f.name != "cover.jpg" && !AppSettings.downloadSaveTrackCover.value) {
+                            runCatching { f.delete() }
+                        }
+                    }
+                }
+            }
+
+            // Drop any image entries under Music/BitChord from Android's MediaStore image database
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                runCatching {
+                    context.contentResolver.delete(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+                        arrayOf("%Music/$FOLDER/%"),
+                    )
+                }
+            }
+            runCatching {
+                context.contentResolver.delete(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    "${MediaStore.MediaColumns.DATA} LIKE ?",
+                    arrayOf("%/Music/$FOLDER/%"),
+                )
+            }
+        }.onFailure { Log.w(TAG, "Failed cleaning gallery images: ${it.message}") }
     }
 
     @Suppress("DEPRECATION")

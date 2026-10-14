@@ -777,6 +777,11 @@ object AppSettings {
         com.music.bitchord.data.spotify.LocalPlaylistStore.init(context)
         readAll()
         watchConnection(context)
+        if (downloadCreateNomedia.value) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.music.bitchord.download.DownloadStore.cleanupGalleryImages(context)
+            }
+        }
     }
 
     /**

@@ -1,22 +1,25 @@
 package com.music.bitchord.data
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
+import java.text.Normalizer
 import java.util.Locale
 
 /**
- * Automatically discovers high-resolution album and track artwork for local songs
- * that lack embedded covers using multi-strategy lookups (iTunes Search API, Deezer API,
- * and YouTube Music), with persistent disk caching and automatic local cover.jpg export
- * for system-wide music player compatibility (Poweramp, Namida, Samsung Music).
+ * High-accuracy artwork discovery for local albums and songs that lack cover art.
+ * Employs strict candidate verification (matching artist + title/album like AppleArtistArtRepository),
+ * preventing mismatched covers from attaching to songs. Never touches songs with existing or attached art.
  */
 object OnlineArtworkRepository {
 
@@ -31,6 +34,12 @@ object OnlineArtworkRepository {
     private val FEATURING_REGEX = Regex("""(?i)\s*(?:\(|\[)?\s*(?:feat\.?|ft\.?|featuring|with)\b[^\)\]]*(?:\)|\])?""")
     private val VIDEO_DESCRIPTOR_REGEX = Regex("""(?i)\s*(?:\(|\[)\s*(?:official\s+(?:video|audio|music\s+video|visualizer|lyric\s+video)|lyrics?|audio|remastered(?:\s+\d{4})?|\d+kbps|1080p|720p|hd|hq|4k)\s*(?:\)|\])""")
     private val EDITION_REGEX = Regex("""(?i)\s*(?:\(|\[)\s*(?:deluxe|bonus\s+track|expanded|collector's|anniversary|special|remastered)\s+(?:edition|version)?\s*(?:\)|\])""")
+
+    private val GENERIC_ALBUM_NAMES = setOf(
+        "singles", "single", "downloads", "download", "music", "audio", "unknown",
+        "unknown album", "<unknown>", "album", "tracks", "track", "sounds",
+        "sound", "recordings", "bitchord", "youtube", "ytmusic", "sdcard",
+    )
 
     fun sanitizeTitle(raw: String): String {
         return raw
@@ -52,16 +61,91 @@ object OnlineArtworkRepository {
     }
 
     fun sanitizeAlbum(raw: String): String {
-        return raw
+        val trimmed = raw.trim()
+        val lower = trimmed.lowercase(Locale.ROOT)
+        if (lower in GENERIC_ALBUM_NAMES) return ""
+        val clean = trimmed
             .replace(EDITION_REGEX, "")
             .replace(VIDEO_DESCRIPTOR_REGEX, "")
             .trim()
+        if (clean.lowercase(Locale.ROOT) in GENERIC_ALBUM_NAMES) return ""
+        return clean
+    }
+
+    private fun String.normalized(): String =
+        Normalizer.normalize(lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .filter { it.isLetterOrDigit() }
+
+    private fun matchesArtist(target: String, candidate: String): Boolean {
+        val t = target.normalized()
+        val c = candidate.normalized()
+        if (t.isEmpty() || c.isEmpty()) return false
+        if (t == c || t.contains(c) || c.contains(t)) return true
+
+        val parts = target.split(Regex("""(?i)\s+(?:feat\.?|ft\.?|featuring|&|/)\s+|,"""))
+            .map { it.normalized() }
+            .filter { it.length >= 3 }
+        for (part in parts) {
+            if (c.contains(part) || part.contains(c)) return true
+        }
+        return false
+    }
+
+    private fun matchesTitle(target: String, candidate: String): Boolean {
+        val t = target.normalized()
+        val c = candidate.normalized()
+        if (t.isEmpty() || c.isEmpty()) return false
+        if (t == c || t.startsWith(c) || c.startsWith(t)) return true
+        if (t.length >= 4 && c.length >= 4 && (t.contains(c) || c.contains(t))) return true
+        return false
     }
 
     private fun normalizeKey(artist: String, titleOrAlbum: String): String {
-        val a = artist.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
-        val t = titleOrAlbum.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+        val a = artist.normalized()
+        val t = titleOrAlbum.normalized()
         return "$a:$t"
+    }
+
+    /**
+     * Checks if a song already has valid embedded art, folder art, or remote thumbnail.
+     * True means artwork already exists and MUST NOT be overwritten or touched.
+     */
+    fun hasAttachedArtwork(context: Context, song: Song): Boolean {
+        val thumb = song.thumbnailUrl
+        if (!thumb.isNullOrBlank()) {
+            if (thumb.startsWith("http://") || thumb.startsWith("https://")) return true
+            if (thumb.startsWith("file://")) {
+                val path = Uri.parse(thumb).path
+                if (path != null && File(path).exists() && File(path).length() > 0) return true
+            }
+        }
+        val path = song.localPath
+        if (!path.isNullOrBlank()) {
+            val parent = File(path).parentFile
+            if (parent != null && parent.exists()) {
+                val hasCover = File(parent, "cover.jpg").exists() ||
+                    File(parent, "folder.jpg").exists() ||
+                    File(parent, "Cover.jpg").exists() ||
+                    File(parent, "Folder.jpg").exists() ||
+                    File(parent, "cover.png").exists() ||
+                    File(parent, "folder.png").exists()
+                if (hasCover) return true
+            }
+        }
+        val rawUri = song.localUri ?: song.localPath ?: return false
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (rawUri.startsWith("/")) {
+                retriever.setDataSource(rawUri)
+            } else {
+                retriever.setDataSource(context, Uri.parse(rawUri))
+            }
+            retriever.embeddedPicture != null
+        } catch (_: Throwable) {
+            false
+        } finally {
+            try { retriever.release() } catch (_: Throwable) {}
+        }
     }
 
     private fun loadDiskCache(context: Context) {
@@ -118,24 +202,17 @@ object OnlineArtworkRepository {
         val key = normalizeKey(cleanArtist, cleanAlbum)
         synchronized(memoryCache) { memoryCache[key] }?.let { return@withContext it }
 
-        val query = if (cleanArtist.isNotBlank()) "$cleanArtist $cleanAlbum" else cleanAlbum
+        // 1. iTunes Album Search with strict candidate validation
+        var art = fetchItunesAlbumArt(cleanArtist, cleanAlbum)
 
-        // 1. iTunes Album Search
-        var art = fetchItunesArt(query, entity = "album")
-
-        // 2. Deezer Album Search
+        // 2. Deezer Album Search with strict candidate validation
         if (art == null) {
             art = fetchDeezerAlbumArt(cleanArtist, cleanAlbum)
         }
 
-        // 3. iTunes General Search
+        // 3. YouTube Music Album Search with strict candidate validation
         if (art == null) {
-            art = fetchItunesArt(query, entity = null)
-        }
-
-        // 4. YouTube Music Album Search
-        if (art == null) {
-            art = fetchYtMusicAlbumArt(query)
+            art = fetchYtMusicAlbumArt(cleanArtist, cleanAlbum)
         }
 
         if (art != null) {
@@ -156,7 +233,7 @@ object OnlineArtworkRepository {
         val cleanTitle = sanitizeTitle(title)
         val cleanAlbum = albumName?.let { sanitizeAlbum(it) }?.takeIf { it.isNotBlank() }
 
-        // If an album name is known, prioritize resolving the full album artwork
+        // If a verified album name is known, prioritize resolving the full album artwork
         if (cleanAlbum != null) {
             val albumArt = resolveAlbumArt(context, cleanArtist, cleanAlbum)
             if (albumArt != null) return@withContext albumArt
@@ -167,24 +244,17 @@ object OnlineArtworkRepository {
 
         synchronized(memoryCache) { memoryCache[key] }?.let { return@withContext it }
 
-        val query = if (cleanArtist.isNotBlank()) "$cleanArtist $cleanTitle" else cleanTitle
+        // 1. iTunes Song Search with strict candidate validation
+        var art = fetchItunesSongArt(cleanArtist, cleanTitle)
 
-        // 1. iTunes Song Search
-        var art = fetchItunesArt(query, entity = "song")
-
-        // 2. Deezer Track Search
+        // 2. Deezer Track Search with strict candidate validation
         if (art == null) {
             art = fetchDeezerTrackArt(cleanArtist, cleanTitle)
         }
 
-        // 3. iTunes General Search
+        // 3. YouTube Music Song Search with strict candidate validation
         if (art == null) {
-            art = fetchItunesArt(query, entity = null)
-        }
-
-        // 4. YouTube Music Song Search
-        if (art == null) {
-            art = fetchYtMusicSongArt(query)
+            art = fetchYtMusicSongArt(cleanArtist, cleanTitle)
         }
 
         if (art != null) {
@@ -194,10 +264,10 @@ object OnlineArtworkRepository {
         art
     }
 
-    private fun fetchItunesArt(query: String, entity: String?): String? = runCatching {
+    private fun fetchItunesAlbumArt(artist: String, album: String): String? = runCatching {
+        val query = if (artist.isNotBlank()) "$artist $album" else album
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val entityParam = if (entity != null) "&entity=$entity" else ""
-        val url = "https://itunes.apple.com/search?term=$encoded$entityParam&limit=3"
+        val url = "https://itunes.apple.com/search?term=$encoded&entity=album&limit=10"
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -207,77 +277,186 @@ object OnlineArtworkRepository {
             val body = resp.body?.string() ?: return@runCatching null
             val json = JSONObject(body)
             val results = json.optJSONArray("results") ?: return@runCatching null
-            if (results.length() == 0) return@runCatching null
-            val first = results.getJSONObject(0)
-            val rawArt = first.optString("artworkUrl100").takeIf { it.isNotBlank() } ?: return@runCatching null
-            // Upscale from 100x100 to 1000x1000 high-resolution cover
-            rawArt.replace("100x100bb.jpg", "1000x1000bb.jpg")
-                .replace("100x100bb.png", "1000x1000bb.png")
-                .replace("100x100", "1000x1000")
+
+            for (i in 0 until results.length()) {
+                val r = results.getJSONObject(i)
+                val candidateArtist = r.optString("artistName")
+                val candidateAlbum = r.optString("collectionName")
+
+                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val albumMatches = matchesTitle(album, candidateAlbum)
+
+                if (artistMatches && albumMatches) {
+                    val raw = r.optString("artworkUrl100").takeIf { it.isNotBlank() } ?: continue
+                    return@runCatching raw
+                        .replace("100x100bb.jpg", "1000x1000bb.jpg")
+                        .replace("100x100bb.png", "1000x1000bb.png")
+                        .replace("100x100", "1000x1000")
+                }
+            }
+            null
+        }
+    }.getOrNull()
+
+    private fun fetchItunesSongArt(artist: String, title: String): String? = runCatching {
+        val query = if (artist.isNotBlank()) "$artist $title" else title
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = "https://itunes.apple.com/search?term=$encoded&entity=song&limit=10"
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .build()
+        Http.client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@runCatching null
+            val body = resp.body?.string() ?: return@runCatching null
+            val json = JSONObject(body)
+            val results = json.optJSONArray("results") ?: return@runCatching null
+
+            for (i in 0 until results.length()) {
+                val r = results.getJSONObject(i)
+                val candidateArtist = r.optString("artistName")
+                val candidateTitle = r.optString("trackName")
+
+                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val titleMatches = matchesTitle(title, candidateTitle)
+
+                if (artistMatches && titleMatches) {
+                    val raw = r.optString("artworkUrl100").takeIf { it.isNotBlank() } ?: continue
+                    return@runCatching raw
+                        .replace("100x100bb.jpg", "1000x1000bb.jpg")
+                        .replace("100x100bb.png", "1000x1000bb.png")
+                        .replace("100x100", "1000x1000")
+                }
+            }
+            null
         }
     }.getOrNull()
 
     private fun fetchDeezerAlbumArt(artist: String, album: String): String? = runCatching {
-        val q = if (artist.isNotBlank()) "$artist $album" else album
+        val q = if (artist.isNotBlank()) "artist:\"$artist\" album:\"$album\"" else album
         val encoded = URLEncoder.encode(q, "UTF-8")
-        val url = "https://api.deezer.com/search/album?q=$encoded&limit=1"
+        val url = "https://api.deezer.com/search/album?q=$encoded&limit=5"
         val req = Request.Builder().url(url).build()
         Http.client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return@runCatching null
             val body = resp.body?.string() ?: return@runCatching null
             val json = JSONObject(body)
             val data = json.optJSONArray("data") ?: return@runCatching null
-            if (data.length() == 0) return@runCatching null
-            val first = data.getJSONObject(0)
-            first.optString("cover_xl").takeIf { it.isNotBlank() }
-                ?: first.optString("cover_big").takeIf { it.isNotBlank() }
+
+            for (i in 0 until data.length()) {
+                val r = data.getJSONObject(i)
+                val candidateArtist = r.optJSONObject("artist")?.optString("name").orEmpty()
+                val candidateTitle = r.optString("title")
+
+                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val albumMatches = matchesTitle(album, candidateTitle)
+
+                if (artistMatches && albumMatches) {
+                    val art = r.optString("cover_xl").takeIf { it.isNotBlank() }
+                        ?: r.optString("cover_big").takeIf { it.isNotBlank() }
+                    if (art != null) return@runCatching art
+                }
+            }
+            null
         }
     }.getOrNull()
 
     private fun fetchDeezerTrackArt(artist: String, title: String): String? = runCatching {
-        val q = if (artist.isNotBlank()) "$artist $title" else title
+        val q = if (artist.isNotBlank()) "artist:\"$artist\" track:\"$title\"" else title
         val encoded = URLEncoder.encode(q, "UTF-8")
-        val url = "https://api.deezer.com/search/track?q=$encoded&limit=1"
+        val url = "https://api.deezer.com/search/track?q=$encoded&limit=5"
         val req = Request.Builder().url(url).build()
         Http.client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return@runCatching null
             val body = resp.body?.string() ?: return@runCatching null
             val json = JSONObject(body)
             val data = json.optJSONArray("data") ?: return@runCatching null
-            if (data.length() == 0) return@runCatching null
-            val first = data.getJSONObject(0)
-            val albumObj = first.optJSONObject("album")
-            albumObj?.optString("cover_xl")?.takeIf { it.isNotBlank() }
-                ?: albumObj?.optString("cover_big")?.takeIf { it.isNotBlank() }
+
+            for (i in 0 until data.length()) {
+                val r = data.getJSONObject(i)
+                val candidateArtist = r.optJSONObject("artist")?.optString("name").orEmpty()
+                val candidateTitle = r.optString("title")
+
+                val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+                val titleMatches = matchesTitle(title, candidateTitle)
+
+                if (artistMatches && titleMatches) {
+                    val albumObj = r.optJSONObject("album")
+                    val art = albumObj?.optString("cover_xl")?.takeIf { it.isNotBlank() }
+                        ?: albumObj?.optString("cover_big")?.takeIf { it.isNotBlank() }
+                    if (art != null) return@runCatching art
+                }
+            }
+            null
         }
     }.getOrNull()
 
-    private suspend fun fetchYtMusicAlbumArt(query: String): String? = runCatching {
-        YtMusicRepository.search(query, SearchFilter.ALBUMS).getOrNull()
-            ?.filterIsInstance<SearchResult.Browse>()
-            ?.firstOrNull()
-            ?.item
-            ?.thumbnailUrl
+    private suspend fun fetchYtMusicAlbumArt(artist: String, album: String): String? = runCatching {
+        val query = if (artist.isNotBlank()) "$artist $album" else album
+        val results = YtMusicRepository.search(query, SearchFilter.ALBUMS).getOrNull()
+            ?.filterIsInstance<SearchResult.Browse>() ?: return@runCatching null
+
+        for (item in results) {
+            val candidateTitle = item.item.title
+            val candidateArtist = item.item.subtitle
+            val titleMatches = matchesTitle(album, candidateTitle)
+            val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+            if (titleMatches && artistMatches) {
+                return@runCatching item.item.thumbnailUrl
+            }
+        }
+        null
     }.getOrNull()
 
-    private suspend fun fetchYtMusicSongArt(query: String): String? = runCatching {
-        YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()
-            ?.filterIsInstance<SearchResult.Track>()
-            ?.firstOrNull()
-            ?.song
-            ?.thumbnailUrl
+    private suspend fun fetchYtMusicSongArt(artist: String, title: String): String? = runCatching {
+        val query = if (artist.isNotBlank()) "$artist $title" else title
+        val results = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()
+            ?.filterIsInstance<SearchResult.Track>() ?: return@runCatching null
+
+        for (item in results) {
+            val candidateTitle = item.song.title
+            val candidateArtist = item.song.artist
+            val titleMatches = matchesTitle(title, candidateTitle)
+            val artistMatches = artist.isBlank() || matchesArtist(artist, candidateArtist)
+            if (titleMatches && artistMatches) {
+                return@runCatching item.song.thumbnailUrl
+            }
+        }
+        null
     }.getOrNull()
 
     /**
      * Saves discovered artwork as `cover.jpg` directly into the album's physical folder.
-     * This makes the artwork universally visible to all third-party music players
-     * (Poweramp, Namida, Samsung Music, VLC) and triggers the Android MediaScanner.
+     * Guarded by user preference and directory safety checks to prevent gallery pollution.
      */
     fun saveCoverToAlbumFolder(context: Context, song: Song, artworkUrl: String): Boolean {
+        if (!AppSettings.saveAlbumCoverToFolder.value) return false
+
         val path = song.localPath ?: return false
         val songFile = File(path)
         val folder = songFile.parentFile ?: return false
         if (!folder.exists() || !folder.isDirectory) return false
+
+        // Critical safety: never pollute top-level user directories with album covers
+        val fPath = folder.absolutePath.replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
+        if (fPath == "/storage/emulated/0" ||
+            fPath == "/storage/emulated/0/download" ||
+            fPath == "/storage/emulated/0/music" ||
+            fPath == "/sdcard" ||
+            fPath.endsWith("/dcim") ||
+            fPath.endsWith("/pictures") ||
+            fPath.endsWith("/movies")
+        ) {
+            return false
+        }
+
+        // Create .nomedia first before creating cover.jpg so gallery scanner ignores it
+        if (AppSettings.downloadCreateNomedia.value || AppSettings.noLocalAlbums.value) {
+            val nomedia = File(folder, ".nomedia")
+            if (!nomedia.exists()) {
+                runCatching { nomedia.createNewFile() }
+            }
+        }
 
         val coverFile = File(folder, "cover.jpg")
         if (coverFile.exists() && coverFile.length() > 0) return true
@@ -288,20 +467,6 @@ object OnlineArtworkRepository {
                 if (!resp.isSuccessful) return@runCatching false
                 val bytes = resp.body?.bytes() ?: return@runCatching false
                 coverFile.writeBytes(bytes)
-                if (com.music.bitchord.data.settings.AppSettings.downloadCreateNomedia.value ||
-                    com.music.bitchord.data.settings.AppSettings.noLocalAlbums.value
-                ) {
-                    val nomedia = File(folder, ".nomedia")
-                    if (!nomedia.exists()) {
-                        runCatching { nomedia.createNewFile() }
-                    }
-                }
-                // Do NOT call MediaScannerConnection.scanFile with "image/jpeg" here.
-                // Doing so would index cover.jpg into the Android gallery/Photos app,
-                // flooding the user's photo library with hundreds of album cover images.
-                // Third-party music players (Poweramp, Namida, Samsung Music, VLC)
-                // discover cover.jpg autonomously through their own folder scans and
-                // do NOT require a MediaStore entry for folder artwork to work.
                 true
             }
         }.getOrDefault(false)

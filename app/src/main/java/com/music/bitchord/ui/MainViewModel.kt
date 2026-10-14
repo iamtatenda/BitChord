@@ -1429,7 +1429,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val state = UiState.Success(batch)
                     _librarySongs.value = state
                     _detailStack.value = _detailStack.value.map { page ->
-                        if (page.browseId == "local:all") page.copy(songs = state) else page
+                        if (page.browseId == "local:all" || page.browseId == "local:downloads") {
+                            page.copy(songs = state)
+                        } else page
                     }
                 }
             }
@@ -2644,25 +2646,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val art = OnlineArtworkRepository.resolveAlbumArt(context, artist, title)
             if (art != null) {
-                OnlineArtworkRepository.saveCoverToAlbumFolder(context, songs, art)
+                if (AppSettings.saveAlbumCoverToFolder.value) {
+                    OnlineArtworkRepository.saveCoverToAlbumFolder(context, songs, art)
+                }
                 val updates = mutableMapOf<String, String>()
                 for (s in songs) {
                     updates[s.videoId] = art
                     s.localUri?.let { updates[it] = art }
+                    s.localPath?.let { updates[it] = art }
                 }
                 LocalMediaRepository.updateSongsArtwork(context, updates)
                 withContext(Dispatchers.Main) {
                     val updatedSongs = songs.map { it.copy(thumbnailUrl = art) }
                     val albumKey = "tagged:$title"
-                    localAlbumsByKey[albumKey] = AlbumEntry(
+                    val entry = AlbumEntry(
                         title = title,
                         artist = artist,
                         thumbnailUrl = art,
                         songs = updatedSongs,
                         key = albumKey,
                     )
+                    localAlbumsByKey[albumKey] = entry
+                    localAlbumsByKey[title] = entry
+                    localAlbumsByKey["$title:$artist"] = entry
                     _detailStack.value = _detailStack.value.map { p ->
-                        if (p.browseId.startsWith("local:album:") && (p.title == title || p.browseId == "local:album:$albumKey")) {
+                        if (p.browseId.startsWith("local:album:") &&
+                            (p.title == title || p.browseId == "local:album:$albumKey" || p.browseId == "local:album:$title:$artist")
+                        ) {
                             p.copy(thumbnailUrl = art, songs = UiState.Success(updatedSongs))
                         } else p
                     }

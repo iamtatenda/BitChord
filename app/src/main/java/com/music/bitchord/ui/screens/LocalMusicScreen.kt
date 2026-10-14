@@ -940,7 +940,7 @@ private fun SongGridCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(36.dp),
             )
-            val resolvedArt = rememberRemoteArtworkUrl(song)
+            val resolvedArt = song.thumbnailUrl
             if (resolvedArt != null) {
                 AsyncImage(
                     model = resolvedArt.artworkAt(CARD_ART_PX),
@@ -1366,13 +1366,15 @@ internal object LocalMusicDerivedCache {
         }
     }
 
+    fun invalidate() {
+        lastSongs = null
+        lastCollections = null
+        cachedArtists = emptyList()
+        cachedAlbums = emptyList()
+    }
+
     fun getArtists(songs: List<Song>, sort: LocalMusicSort = LocalMusicSort.TITLE_ASC): List<Map.Entry<String, List<Song>>> {
-        val sameSongs = songs === lastSongs || (
-            cachedArtists.isNotEmpty() &&
-            songs.size == lastSongs?.size &&
-            songs.firstOrNull()?.videoId == lastSongs?.firstOrNull()?.videoId &&
-            songs.lastOrNull()?.videoId == lastSongs?.lastOrNull()?.videoId
-        )
+        val sameSongs = songs === lastSongs
         if (sameSongs && sort == lastArtistSort && cachedArtists.isNotEmpty()) return cachedArtists
         val grouped = groupSongsBySplitArtists(songs)
         val result = when (sort) {
@@ -1400,13 +1402,7 @@ internal object LocalMusicDerivedCache {
         isDownloads: Boolean = false,
         noLocalAlbums: Boolean = true,
     ): List<AlbumEntry> {
-        val sameSongs = (songs === lastSongs && collections === lastCollections) || (
-            cachedAlbums.isNotEmpty() &&
-            songs.size == lastSongs?.size &&
-            collections.size == lastCollections?.size &&
-            songs.firstOrNull()?.videoId == lastSongs?.firstOrNull()?.videoId &&
-            songs.lastOrNull()?.videoId == lastSongs?.lastOrNull()?.videoId
-        )
+        val sameSongs = songs === lastSongs && collections === lastCollections
         if (sameSongs && sort == lastAlbumSort && isDownloads == lastIsDownloads && noLocalAlbums == lastNoLocalAlbums && cachedAlbums.isNotEmpty()) return cachedAlbums
         val base = albumEntries(songs, collections, isDownloads = isDownloads, noLocalAlbums = noLocalAlbums)
         val result = when (sort) {
@@ -1546,8 +1542,7 @@ private fun AlbumGridCard(
             )
             // Albums grouped off tags have no cover of their own; the first
             // track's embedded picture stands in until the real one exists.
-            val fetchedArt = rememberRemoteArtworkUrl(entry.songs.firstOrNull())
-            val cardArt = entry.thumbnailUrl ?: fetchedArt
+            val cardArt = entry.thumbnailUrl ?: entry.songs.firstNotNullOfOrNull { it.thumbnailUrl }
             if (cardArt != null) {
                 AsyncImage(
                     model = cardArt.artworkAt(CARD_ART_PX),
@@ -1597,9 +1592,7 @@ private fun AlbumRow(
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
 ) {
-    // Hoisted out of the artwork call below: a conditional hook would
-    // reshuffle composition groups when a refresh fills the cover in.
-    val fetchedArt = rememberRemoteArtworkUrl(entry.songs.firstOrNull())
+    val art = entry.thumbnailUrl ?: entry.songs.firstNotNullOfOrNull { it.thumbnailUrl }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1609,7 +1602,7 @@ private fun AlbumRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CollectionArtwork(
-            url = entry.thumbnailUrl ?: fetchedArt,
+            url = art,
             playlist = entry.playlist,
             size = 48.dp,
         )

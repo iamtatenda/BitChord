@@ -1045,34 +1045,6 @@ object Downloads {
                         )
                     }
                 }
-                if (AppSettings.downloadSaveAlbumCover.value && cover != null) {
-                    if (!subfolder.isNullOrEmpty() && !track.albumName.isNullOrBlank()) {
-                        DownloadStore.writeCompanion(
-                            context,
-                            subfolder,
-                            "cover.jpg",
-                            cover.bytes,
-                            cover.mime
-                        )
-                    } else if (!AppSettings.downloadSaveTrackCover.value) {
-                        DownloadStore.writeCompanion(
-                            context,
-                            subfolder,
-                            "$trackStem.jpg",
-                            cover.bytes,
-                            cover.mime
-                        )
-                    }
-                }
-                if (AppSettings.downloadSaveTrackCover.value && cover != null) {
-                    DownloadStore.writeCompanion(
-                        context,
-                        subfolder,
-                        "$trackStem.jpg",
-                        cover.bytes,
-                        cover.mime
-                    )
-                }
                 if (AppSettings.downloadCreateNomedia.value) {
                     DownloadStore.writeCompanion(
                         context,
@@ -1090,6 +1062,26 @@ object Downloads {
                             "application/octet-stream"
                         )
                     }
+                }
+                if (AppSettings.downloadSaveAlbumCover.value && cover != null) {
+                    if (!subfolder.isNullOrEmpty() && !track.albumName.isNullOrBlank()) {
+                        DownloadStore.writeCompanion(
+                            context,
+                            subfolder,
+                            "cover.jpg",
+                            cover.bytes,
+                            cover.mime
+                        )
+                    }
+                }
+                if (AppSettings.downloadSaveTrackCover.value && cover != null) {
+                    DownloadStore.writeCompanion(
+                        context,
+                        subfolder,
+                        "$trackStem.jpg",
+                        cover.bytes,
+                        cover.mime
+                    )
                 }
 
                 remember(song, track, savedUri, route.downloadFormat, artworkUri)

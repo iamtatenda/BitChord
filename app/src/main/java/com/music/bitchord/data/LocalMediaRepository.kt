@@ -142,7 +142,7 @@ object LocalMediaRepository {
         if (current.isEmpty()) return
         var changed = false
         val newSongs = current.map { song ->
-            val newArt = updated[song.videoId] ?: updated[song.localUri]
+            val newArt = updated[song.videoId] ?: updated[song.localUri] ?: updated[song.localPath]
             if (newArt != null && newArt != song.thumbnailUrl) {
                 changed = true
                 song.copy(thumbnailUrl = newArt)
@@ -152,22 +152,19 @@ object LocalMediaRepository {
         }
         if (!changed) return
         saveCachedLocalMusic(context, newSongs)
-        // Push into the live flow so Compose sees the new artwork without
-        // requiring a full re-index. Only emit when something actually changed
-        // to avoid the list-reference churn that reset scroll positions.
+        runCatching { com.music.bitchord.ui.screens.LocalMusicDerivedCache.invalidate() }
         liveDiscoveredSongs.value = newSongs
     }
 
     /**
      * Asynchronously enriches local albums and songs that lack cover art.
-     * Groups by album to minimize network lookups, writes cover.jpg for third-party players,
-     * and persists discovered artwork to the local library cache.
+     * Respects user permission, strictly preserves existing/attached art,
+     * writes cover.jpg only if opted-in, and persists discovered art.
      */
     suspend fun enrichLibraryArtwork(context: Context, songs: List<Song>) = withContext(Dispatchers.IO) {
-        if (!com.music.bitchord.data.settings.AppSettings.autoDiscoverArtwork.value) return@withContext
+        if (!AppSettings.autoDiscoverArtwork.value) return@withContext
         val missingArt = songs.filter { s ->
-            val t = s.thumbnailUrl
-            t.isNullOrBlank() || t.startsWith("audio:")
+            !OnlineArtworkRepository.hasAttachedArtwork(context, s)
         }
         if (missingArt.isEmpty()) return@withContext
 
@@ -189,14 +186,16 @@ object LocalMediaRepository {
             }
 
             if (foundArt != null) {
-                if (com.music.bitchord.data.settings.AppSettings.saveAlbumCoverToFolder.value) {
+                if (AppSettings.saveAlbumCoverToFolder.value) {
                     OnlineArtworkRepository.saveCoverToAlbumFolder(context, albumTracks, foundArt)
                 }
                 for (track in albumTracks) {
                     updates[track.videoId] = foundArt
                     track.localUri?.let { updates[it] = foundArt }
+                    track.localPath?.let { updates[it] = foundArt }
                 }
             }
+            kotlinx.coroutines.delay(50)
         }
 
         if (updates.isNotEmpty()) {
@@ -804,8 +803,15 @@ object LocalMediaRepository {
         saveCachedLocalMusic(context, deduplicated)
         indexedCount.value = deduplicated.size
         liveDiscoveredSongs.value = deduplicated
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            runCatching { enrichLibraryArtwork(context, deduplicated) }
+        if (AppSettings.autoDiscoverArtwork.value) {
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                runCatching { enrichLibraryArtwork(context, deduplicated) }
+            }
+        }
+        if (AppSettings.downloadCreateNomedia.value) {
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                runCatching { com.music.bitchord.download.DownloadStore.cleanupGalleryImages(context) }
+            }
         }
         deduplicated
     } finally {

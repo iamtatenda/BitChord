@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
+import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.download.DownloadStore
@@ -906,7 +907,8 @@ object LocalMediaRepository {
             songs.map { song ->
                 val album = song.albumName?.trim()?.lowercase(Locale.ROOT)
                 val inherited = if (album != null) albumCoverMap[album] else null
-                if (inherited != null && (song.thumbnailUrl == null || song.thumbnailUrl.startsWith("audio:"))) {
+                val currentThumb = song.thumbnailUrl
+                if (inherited != null && (currentThumb == null || currentThumb.startsWith("audio:"))) {
                     song.copy(thumbnailUrl = inherited)
                 } else {
                     song
@@ -1418,6 +1420,6 @@ object LocalMediaRepository {
             val docId = DocumentsContract.getDocumentId(doc.uri)
             resolvePhysicalPath(docId)
         }.getOrNull()
-        return buildSongFromSaf(doc.uri, name, doc.lastModified(), folderArtUri, resolvedPath)
+        return buildSongFromSaf(context, doc.uri, name, doc.lastModified(), folderArtUri, resolvedPath)
     }
 }

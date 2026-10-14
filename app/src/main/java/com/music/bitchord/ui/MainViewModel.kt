@@ -657,8 +657,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         val cleanTitle = OnlineArtworkRepository.sanitizeTitle(song.title)
                         val query = "$cleanArtist $cleanTitle".trim()
                         if (query.isNotBlank()) {
-                            val match = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()?.firstOrNull()
-                            val matchedSong = (match as? SearchResult.Track)?.song ?: (match as? SearchResult.TopTrack)?.song
+                            val matchedSong = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()
+                                ?.firstNotNullOfOrNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
                             if (matchedSong != null) {
                                 val ytid = matchedSong.videoId
                                 YtMusicRepository.rate(ytid, status).fold(

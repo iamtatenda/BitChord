@@ -2668,8 +2668,8 @@ class PlaybackService : MediaLibraryService() {
                     val cleanTitle = OnlineArtworkRepository.sanitizeTitle(current.title)
                     val query = "$cleanArtist $cleanTitle".trim()
                     if (query.isNotBlank()) {
-                        val match = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()?.firstOrNull()
-                        val matchedSong = (match as? SearchResult.Track)?.song ?: (match as? SearchResult.TopTrack)?.song
+                        val matchedSong = YtMusicRepository.search(query, SearchFilter.SONGS).getOrNull()
+                            ?.firstNotNullOfOrNull { (it as? SearchResult.Track)?.song ?: (it as? SearchResult.TopTrack)?.song }
                         if (matchedSong != null) {
                             YtMusicRepository.rate(matchedSong.videoId, target)
                                 .onSuccess { LikeState.set(matchedSong.videoId, target) }

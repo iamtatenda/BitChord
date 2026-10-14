@@ -1325,7 +1325,7 @@ object LocalMediaRepository {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (ext !in localMusicExtensions) return null
 
-        if (AppSettings.filterNonMusicAudio.value && file.length() < 50_000L) {
+        if (AppSettings.filterNonMusicAudio.value) {
             val durationMs = runCatching {
                 val mr = MediaMetadataRetriever()
                 mr.setDataSource(path)
@@ -1333,7 +1333,7 @@ object LocalMediaRepository {
                 mr.release()
                 d
             }.getOrDefault(0L)
-            if (durationMs in 1 until MIN_LOCAL_MUSIC_DURATION_MS) return null
+            if (!isEligibleLocalMusic(durationMs, name, path)) return null
         }
 
         val parent = file.parentFile

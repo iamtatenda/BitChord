@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.material.icons.Icons
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Animation
@@ -223,6 +225,7 @@ fun SettingsScreen(
     val downloadQuality by AppSettings.downloadQuality.collectAsStateWithLifecycle()
     val wifiOnlyDownloads by AppSettings.wifiOnlyDownloads.collectAsStateWithLifecycle()
     val exportDownloads by AppSettings.exportDownloads.collectAsStateWithLifecycle()
+    val downloadFolderUri by AppSettings.downloadFolderUri.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val hideSongStatus by AppSettings.hideSongStatus.collectAsStateWithLifecycle()
@@ -271,6 +274,7 @@ fun SettingsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
+    var pickingDownloadOptions by rememberSaveable { mutableStateOf(false) }
     var pickingAutomixPerformance by remember { mutableStateOf(false) }
     // What the last export or import did, shown on the row that did it rather
     // than as a toast: a backup is the one action here whose outcome nobody can
@@ -524,13 +528,27 @@ fun SettingsScreen(
                     badge = stringResource(R.string.blocking).takeIf { wifiOnlyDownloads && metered == true },
                 )
             }
+            val downloadOptionsTitle = stringResource(R.string.download_customization_title)
+            val downloadFolderLabel = com.music.bitchord.download.DownloadStore.selectedFolderLabel(downloadFolderUri)
+            row(downloadOptionsTitle, "download folder", "saf", "lrc", "lyrics", "cover", "album cover", "nomedia", "separator") {
+                SettingsRow(
+                    icon = Icons.Rounded.Folder,
+                    title = downloadOptionsTitle,
+                    subtitle = downloadFolderLabel ?: stringResource(R.string.download_customization_subtitle),
+                    onClick = { pickingDownloadOptions = true },
+                )
+            }
             val exportDownloadsTitle = stringResource(R.string.export_compatible_downloads)
             row(exportDownloadsTitle, "music folder", divided = false) {
                 SettingsSubRow(
                     title = exportDownloadsTitle,
                     checked = exportDownloads,
                     onCheckedChange = AppSettings::setExportDownloads,
-                    subtitle = "Music/BitChord".takeIf { exportDownloads },
+                    subtitle = if (downloadFolderLabel != null) {
+                        stringResource(R.string.download_export_active_folder, downloadFolderLabel).takeIf { exportDownloads }
+                    } else {
+                        "Music/BitChord".takeIf { exportDownloads }
+                    },
                 )
             }
         }
@@ -1470,6 +1488,15 @@ fun SettingsScreen(
         }
     }
 
+    if (pickingDownloadOptions) {
+        ModalBottomSheet(
+            onDismissRequest = { pickingDownloadOptions = false },
+            containerColor = MaterialTheme.colorScheme.background,
+        ) {
+            DownloadOptionsSheet()
+        }
+    }
+
     if (pickingAutomixPerformance) {
         ModalBottomSheet(
             onDismissRequest = { pickingAutomixPerformance = false },
@@ -2100,9 +2127,308 @@ private fun DownloadQualitySheet(
                     )
                 }
             }
+    }
+}
+
+private enum class DownloadOptionsView {
+    MAIN,
+    ARTIST_SEPARATOR,
+}
+
+private fun formatArtistSeparator(sep: String): String = when (sep) {
+    " / " -> "Slash ( / )"
+    "; " -> "Semicolon (; )"
+    " & " -> "Ampersand ( & )"
+    " • " -> "Bullet ( • )"
+    " | " -> "Pipe ( | )"
+    else -> "Comma (, )"
+}
+
+@Composable
+private fun DownloadOptionsSheet() {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    var currentView by rememberSaveable { mutableStateOf(DownloadOptionsView.MAIN) }
+
+    BackHandler(enabled = currentView != DownloadOptionsView.MAIN) {
+        currentView = DownloadOptionsView.MAIN
+    }
+
+    val downloadFolderUri by AppSettings.downloadFolderUri.collectAsStateWithLifecycle()
+    val organizeFolders by AppSettings.downloadOrganizeFolders.collectAsStateWithLifecycle()
+    val saveAlbumCover by AppSettings.downloadSaveAlbumCover.collectAsStateWithLifecycle()
+    val saveTrackCover by AppSettings.downloadSaveTrackCover.collectAsStateWithLifecycle()
+    val createNomedia by AppSettings.downloadCreateNomedia.collectAsStateWithLifecycle()
+    val saveLrcLyrics by AppSettings.downloadSaveLrcLyrics.collectAsStateWithLifecycle()
+    val artistSeparator by AppSettings.downloadArtistSeparator.collectAsStateWithLifecycle()
+
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { folder ->
+        if (folder == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                folder,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+        AppSettings.setDownloadFolderUri(folder.toString())
+    }
+
+    when (currentView) {
+        DownloadOptionsView.MAIN -> {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 24.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Download,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.download_customization_title),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                        )
+                        Text(
+                            text = stringResource(R.string.download_customization_subtitle),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+                SettingsGroup(
+                    header = stringResource(R.string.download_storage_section),
+                    topSpacing = 16.dp,
+                ) {
+                    val selectedFolderLabel = com.music.bitchord.download.DownloadStore.selectedFolderLabel(downloadFolderUri)
+                    SettingsRow(
+                        icon = Icons.Rounded.Folder,
+                        title = stringResource(R.string.download_folder_title),
+                        subtitle = selectedFolderLabel ?: stringResource(R.string.download_folder_default),
+                        onClick = { folderPicker.launch(null) },
+                    )
+
+                    if (!downloadFolderUri.isNullOrBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    AppSettings.setDownloadFolderUri("")
+                                }
+                                .padding(start = TEXT_INSET, end = ROW_INSET, top = 0.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.download_folder_reset),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.Folder,
+                        title = stringResource(R.string.download_organize_folders_title),
+                        subtitle = stringResource(R.string.download_organize_folders_desc),
+                        trailing = {
+                            Switch(
+                                checked = organizeFolders,
+                                onCheckedChange = AppSettings::setDownloadOrganizeFolders,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadOrganizeFolders(!organizeFolders) },
+                    )
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.VisibilityOff,
+                        title = stringResource(R.string.download_create_nomedia_title),
+                        subtitle = stringResource(R.string.download_create_nomedia_desc),
+                        trailing = {
+                            Switch(
+                                checked = createNomedia,
+                                onCheckedChange = AppSettings::setDownloadCreateNomedia,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadCreateNomedia(!createNomedia) },
+                    )
+                }
+
+                SettingsGroup(
+                    header = stringResource(R.string.download_metadata_section),
+                    topSpacing = 16.dp,
+                ) {
+                    SettingsRow(
+                        icon = Icons.Rounded.AutoAwesome,
+                        title = stringResource(R.string.download_save_album_cover_title),
+                        subtitle = stringResource(R.string.download_save_album_cover_desc),
+                        trailing = {
+                            Switch(
+                                checked = saveAlbumCover,
+                                onCheckedChange = AppSettings::setDownloadSaveAlbumCover,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadSaveAlbumCover(!saveAlbumCover) },
+                    )
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.AutoAwesome,
+                        title = stringResource(R.string.download_save_track_cover_title),
+                        subtitle = stringResource(R.string.download_save_track_cover_desc),
+                        trailing = {
+                            Switch(
+                                checked = saveTrackCover,
+                                onCheckedChange = AppSettings::setDownloadSaveTrackCover,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadSaveTrackCover(!saveTrackCover) },
+                    )
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.AutoMirrored.Rounded.Notes,
+                        title = stringResource(R.string.download_save_lrc_title),
+                        subtitle = stringResource(R.string.download_save_lrc_desc),
+                        trailing = {
+                            Switch(
+                                checked = saveLrcLyrics,
+                                onCheckedChange = AppSettings::setDownloadSaveLrcLyrics,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDownloadSaveLrcLyrics(!saveLrcLyrics) },
+                    )
+
+                    RowDivider()
+
+                    SettingsRow(
+                        icon = Icons.Rounded.Person,
+                        title = stringResource(R.string.download_artist_separator_title),
+                        subtitle = stringResource(R.string.download_artist_separator_desc),
+                        value = formatArtistSeparator(artistSeparator),
+                        onClick = { currentView = DownloadOptionsView.ARTIST_SEPARATOR },
+                    )
+                }
+            }
+        }
+        DownloadOptionsView.ARTIST_SEPARATOR -> {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 24.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clickable { currentView = DownloadOptionsView.MAIN }
+                        .padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = stringResource(R.string.back),
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.download_artist_separator_title),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                        )
+                        Text(
+                            text = stringResource(R.string.download_artist_separator_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+                val separators = listOf(
+                    ", " to "Comma (, )",
+                    " / " to "Slash ( / )",
+                    "; " to "Semicolon (; )",
+                    " & " to "Ampersand ( & )",
+                    " • " to "Bullet ( • )",
+                    " | " to "Pipe ( | )",
+                )
+
+                separators.forEach { (sep, label) ->
+                    val chosen = sep == artistSeparator
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                AppSettings.setDownloadArtistSeparator(sep)
+                                currentView = DownloadOptionsView.MAIN
+                            }
+                            .padding(horizontal = ROW_INSET, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (chosen) {
+                            Spacer(Modifier.width(12.dp))
+                            Icon(
+                                Icons.Rounded.Check,
+                                contentDescription = stringResource(R.string.selected),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
 
 // ---- Building blocks --------------------------------------------------------
 
